@@ -2,7 +2,7 @@
 
 ## Python PyQt GUI for managing FAT12 floppy disk images
 
-A modern, cross-platform GUI tool designed specifically for managing floppy disk images (.img) used in Yamaha keyboards like the **DGX-500**, **PSR series**, and **Clavinova** or other vintage keyboards.  Standard FAT12 format currently verified to work with Yamaha DGX-500.
+A modern GUI tool designed for managing FAT12 formatted floppy disk images (.img) used in Yamaha keyboards like the **DGX-500**, **PSR series**, and **Clavinova** or other vintage keyboards. Currently verified to work with Yamaha DGX-500.
 
 ---
 
