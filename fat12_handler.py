@@ -44,14 +44,54 @@ class FAT12Image:
             boot_sector = f.read(512)
             
         # Parse BPB (BIOS Parameter Block)
+        self.oem_name = boot_sector[3:11].decode('ascii', errors='ignore').rstrip()
         self.bytes_per_sector = struct.unpack('<H', boot_sector[11:13])[0]
         self.sectors_per_cluster = boot_sector[13]
         self.reserved_sectors = struct.unpack('<H', boot_sector[14:16])[0]
         self.num_fats = boot_sector[16]
         self.root_entries = struct.unpack('<H', boot_sector[17:19])[0]
-        self.total_sectors = struct.unpack('<H', boot_sector[19:21])[0]
+        total_sectors_short = struct.unpack('<H', boot_sector[19:21])[0]
+
+        self.media_descriptor = boot_sector[21]
+
         self.sectors_per_fat = struct.unpack('<H', boot_sector[22:24])[0]
-        
+
+        self.sectors_per_track = struct.unpack('<H', boot_sector[24:26])[0]
+        self.number_of_heads = struct.unpack('<H', boot_sector[26:28])[0]
+        self.hidden_sectors = struct.unpack('<I', boot_sector[28:32])[0]
+
+        if total_sectors_short != 0:
+            self.total_sectors = total_sectors_short
+        else:
+            # 2. If 0, read the 32-bit total sectors at 0x20
+            self.total_sectors = struct.unpack('<I', boot_sector[32:36])[0]
+
+        #
+        # Extended BIOS Parameter Block (EBPB)
+        #
+
+        # Drive Number (Offset 36)
+        self.drive_number = boot_sector[36] 
+
+        # Reserved/Current Head (Offset 37) - Usually 0
+        self.reserved_ebpb = boot_sector[37]
+
+        # Boot Signature (Offset 38)
+        # If this is 0x28 or 0x29, the following fields are valid
+        self.boot_signature = boot_sector[38]
+
+        # Volume ID / Serial Number (Offset 39)
+        self.volume_id = struct.unpack('<I', boot_sector[39:43])[0]
+
+        # Volume Label (Offset 43 to 54)
+        self.volume_label = boot_sector[43:54].decode('ascii', errors='ignore').rstrip()
+
+        # File System Type (Offset 54 to 62)
+        # Should determine the FAT type by calculating the number of clusters, 
+        # not by reading this string
+        self.fs_type = boot_sector[54:62].decode('ascii', errors='ignore').strip()
+
+        # Calculations
         self.fat_start = self.reserved_sectors * self.bytes_per_sector
         self.root_start = self.fat_start + (self.num_fats * self.sectors_per_fat * self.bytes_per_sector)
         self.root_size = (self.root_entries * 32)
@@ -362,13 +402,27 @@ if __name__ == "__main__":
     img = FAT12Image(image_path)
     
     print("\nBoot Sector Information:")
+    print(f"  OEM name: {img.oem_name}")
     print(f"  Bytes per sector: {img.bytes_per_sector}")
     print(f"  Sectors per cluster: {img.sectors_per_cluster}")
     print(f"  Reserved sectors: {img.reserved_sectors}")
     print(f"  Number of FATs: {img.num_fats}")
     print(f"  Root entries: {img.root_entries}")
     print(f"  Total sectors: {img.total_sectors}")
+    print(f"  Media descriptor: 0x{img.media_descriptor:02X}")
     print(f"  Sectors per FAT: {img.sectors_per_fat}")
+    print(f"  Sectors per track: {img.sectors_per_track}")
+    print(f"  Number of heads: {img.number_of_heads}")
+    print(f"  Number of hidden sectors: {img.hidden_sectors}")
+
+    print("\nExtended BIOS Parameter Block (EBPB):")
+    print(f"  Drive number: {img.drive_number} (0x{img.drive_number:02X})")
+    print(f"  Reserved/current head: {img.reserved_ebpb}")
+    boot_sig_status = "Valid" if img.boot_signature == 0x29 else "Invalid/Old"
+    print(f"  Boot signature: 0x{img.boot_signature:02X} ({boot_sig_status})")
+    print(f"  Volume ID: 0x{img.volume_id:08X}")
+    print(f"  Volume label: {img.volume_label}")
+    print(f"  File system type: {img.fs_type}")
     
     print("\nDirectory Contents:")
     entries = img.read_root_directory()
