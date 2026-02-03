@@ -39,7 +39,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QIcon, QAction, QKeySequence
 
-# import the FAT12 handler
+# Import the FAT12 handler
 from fat12_handler import FAT12Image
 
 
@@ -49,12 +49,12 @@ class FloppyManagerWindow(QMainWindow):
     def __init__(self, image_path: Optional[str] = None):
         super().__init__()
 
-        # settings
+        # Settings
         self.settings = QSettings('FAT12FloppyManager', 'Settings')
         self.confirm_delete = self.settings.value('confirm_delete', True, type=bool)
         self.confirm_replace = self.settings.value('confirm_replace', True, type=bool)
 
-        # restore window geometry if available
+        # Restore window geometry if available
         geometry = self.settings.value('window_geometry')
         if geometry:
             self.restoreGeometry(geometry)
@@ -64,16 +64,16 @@ class FloppyManagerWindow(QMainWindow):
 
         self.setup_ui()
 
-        # load image if provided or restore last image
+        # Load image if provided or restore last image
         if image_path:
             self.load_image(image_path)
         else:
-            # try to restore last opened image
+            # Try to restore last opened image
             last_image = self.settings.value('last_image_path', '')
             if last_image and Path(last_image).exists():
                 self.load_image(last_image)
             else:
-                # no image loaded, show empty state
+                # No image loaded, show empty state
                 self.status_bar.showMessage("No image loaded. Create new or open existing image.")
 
     def setup_ui(self):
@@ -81,28 +81,28 @@ class FloppyManagerWindow(QMainWindow):
         self.setWindowTitle("FAT12 Floppy Manager")
         self.setGeometry(100, 100, 900, 600)
 
-        # enable drag and drop
+        # Enable drag and drop
         self.setAcceptDrops(True)
 
-        # set window icon if available
+        # Set window icon if available
         icon_path = Path(__file__).parent / 'floppy_icon.ico'
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 
-        # create menu bar
+        # Create menu bar
         self.create_menus()
 
-        # central widget
+        # Central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # main layout
+        # Main layout
         layout = QVBoxLayout(central_widget)
 
-        # top toolbar
+        # Top toolbar
         toolbar = QHBoxLayout()
 
-        # buttons
+        # Buttons
         self.add_btn = QPushButton("📁 Add Files")
         self.add_btn.setToolTip("Add files to the floppy image")
         self.add_btn.clicked.connect(self.add_files)
@@ -125,52 +125,52 @@ class FloppyManagerWindow(QMainWindow):
         toolbar.addWidget(self.refresh_btn)
         toolbar.addStretch()
 
-        # info label
+        # Info label
         self.info_label = QLabel()
         self.info_label.setStyleSheet("QLabel { color: #555; font-weight: bold; }")
         toolbar.addWidget(self.info_label)
 
         layout.addLayout(toolbar)
 
-        # file table
+        # File table
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(['Filename', 'Size', 'Type', 'Index'])
 
-        # hide the index column (used internally)
+        # Hide the index column (used internally)
         self.table.setColumnHidden(3, True)
 
-        # configure table
+        # Configure table
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
-        # set column widths
+        # Set column widths
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
 
-        # double-click to extract
+        # Double-click to extract
         self.table.doubleClicked.connect(self.extract_selected)
 
         layout.addWidget(self.table)
 
-        # status bar
+        # Status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready | Tip: Drag and drop files to add them to the floppy")
 
-        # keyboard shortcuts
+        # Keyboard shortcuts
         self.table.keyPressEvent = self.table_key_press
 
     def create_menus(self):
         """Create menu bar"""
         menubar = self.menuBar()
 
-        # file menu
+        # File menu
         file_menu = menubar.addMenu("&File")
 
         new_action = QAction("&New Image...", self)
@@ -199,7 +199,7 @@ class FloppyManagerWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # settings menu
+        # Settings menu
         settings_menu = menubar.addMenu("&Settings")
 
         self.confirm_delete_action = QAction("Confirm before deleting", self)
@@ -214,7 +214,7 @@ class FloppyManagerWindow(QMainWindow):
         self.confirm_replace_action.triggered.connect(self.toggle_confirm_replace)
         settings_menu.addAction(self.confirm_replace_action)
 
-        # help menu
+        # Help menu
         help_menu = menubar.addMenu("&Help")
 
         about_action = QAction("&About", self)
@@ -236,7 +236,7 @@ class FloppyManagerWindow(QMainWindow):
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.delete_selected()
         else:
-            # call the original keyPressEvent
+            # Call the original keyPressEvent
             QTableWidget.keyPressEvent(self.table, event)
 
     def load_image(self, filepath: str):
@@ -246,7 +246,7 @@ class FloppyManagerWindow(QMainWindow):
             self.image_path = filepath
             self.setWindowTitle(f"FAT12 Floppy Manager - {Path(filepath).name}")
 
-            # save as last opened image
+            # Save as last opened image
             self.settings.setValue('last_image_path', filepath)
 
             self.refresh_file_list()
@@ -273,22 +273,22 @@ class FloppyManagerWindow(QMainWindow):
                     row = self.table.rowCount()
                     self.table.insertRow(row)
 
-                    # filename
+                    # Filename
                     self.table.setItem(row, 0, QTableWidgetItem(entry['name']))
 
-                    # size
+                    # Size
                     size_str = f"{entry['size']:,} bytes"
                     self.table.setItem(row, 1, QTableWidgetItem(size_str))
 
-                    # type
+                    # Type
                     file_type = Path(entry['name']).suffix.upper().lstrip('.')
                     self.table.setItem(row, 2, QTableWidgetItem(file_type))
 
-                    # index (hidden)
+                    # Index (hidden)
                     self.table.setItem(row, 3, QTableWidgetItem(str(entry['index'])))
 
-            # update info
-            free_clusters = len(self.image.find_free_clusters(999))
+            # Update info
+            free_clusters = len(self.image.find_free_clusters())
             free_space = free_clusters * self.image.bytes_per_cluster
             self.info_label.setText(f"{len(entries)} files | {free_space:,} bytes free")
             self.status_bar.showMessage(f"Loaded {len(entries)} files")
@@ -337,19 +337,19 @@ class FloppyManagerWindow(QMainWindow):
                 
                 path_obj = Path(filepath)
 
-                # get stem, uppercase, truncate to 8 chars, then strip whitespace
+                # Get stem, uppercase, truncate to 8 chars, then strip whitespace
                 stem = path_obj.stem.upper()[:8].strip()
 
-                # get extension, remove dot, uppercase, truncate to 3 chars, strip whitespace
+                # Get extension, remove dot, uppercase, truncate to 3 chars, strip whitespace
                 suffix = path_obj.suffix.lstrip('.').upper()[:3].strip()
 
-                # form the target filename as it appears in the existing file list
+                # Form the target filename as it appears in the existing file list
                 target_filename = f"{stem}.{suffix}" if suffix else stem
 
-                # check if file already exists using the target filename
+                # Check if file already exists using the target filename
                 existing = self.image.read_root_directory()
 
-                # find the specific entry that collides, if any
+                # Find the specific entry that collides, if any
                 collision_entry = next((e for e in existing if e['name'] == target_filename), None)
 
                 if collision_entry:
@@ -363,10 +363,10 @@ class FloppyManagerWindow(QMainWindow):
                         if response == QMessageBox.StandardButton.No:
                             continue
 
-                    # delete the existing file found by the 8.3 match
+                    # Delete the existing file found by the 8.3 match
                     self.image.delete_file(collision_entry)
 
-                # write the new file
+                # Write the new file
                 if self.image.write_file_to_image(path_obj.name, data):
                     success_count += 1
                 else:
@@ -480,15 +480,15 @@ class FloppyManagerWindow(QMainWindow):
         if not filename:
             return
 
-        # ensure .img extension
+        # Ensure .img extension
         if not filename.lower().endswith('.img'):
             filename += '.img'
 
         try:
-            # create a blank 1.44MB floppy image using the handler
+            # Create a blank 1.44MB floppy image using the handler
             FAT12Image.create_blank_image(filename)
 
-            # load the new image
+            # Load the new image
             self.load_image(filename)
 
             QMessageBox.information(
@@ -515,12 +515,12 @@ class FloppyManagerWindow(QMainWindow):
         if not filename:
             return
 
-        # ensure .img extension
+        # Ensure .img extension
         if not filename.lower().endswith('.img'):
             filename += '.img'
 
         try:
-            # copy the current image file
+            # Copy the current image file
             import shutil
             shutil.copy2(self.image_path, filename)
 
@@ -581,10 +581,10 @@ class FloppyManagerWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close event - save state"""
-        # save window geometry
+        # Save window geometry
         self.settings.setValue('window_geometry', self.saveGeometry())
 
-        # last image path is already saved when loaded
+        # Last image path is already saved when loaded
 
         event.accept()
 

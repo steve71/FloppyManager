@@ -141,18 +141,19 @@ class FAT12Image:
         
         return entries
     
-    def find_free_clusters(self, count: int) -> List[int]:
-        """Find free clusters in the FAT"""
+    def find_free_clusters(self, count: int = None) -> List[int]:
+        """Find free clusters in the FAT. If count is None, find all."""
         fat_data = self.read_fat()
         free_clusters = []
         
-        # Start from cluster 2 (0 and 1 are reserved)
+        # Total data clusters available on the disk
         total_clusters = (self.total_sectors - (self.data_start // self.bytes_per_sector)) // self.sectors_per_cluster
         
         for cluster in range(2, total_clusters + 2):
             if self.get_fat_entry(fat_data, cluster) == 0:
                 free_clusters.append(cluster)
-                if len(free_clusters) >= count:
+                # Only break if a specific count was requested
+                if count is not None and len(free_clusters) >= count:
                     break
         
         return free_clusters
@@ -377,7 +378,7 @@ if __name__ == "__main__":
     else:
         print("  (empty)")
     
-    free = len(img.find_free_clusters(999))
+    free = len(img.find_free_clusters())
     free_bytes = free * img.bytes_per_cluster
     total_bytes = img.total_sectors * img.bytes_per_sector
     
