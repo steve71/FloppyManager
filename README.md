@@ -61,16 +61,20 @@ dist\FAT12 Floppy Manager.exe
 ### File Management
 - **Create new blank floppy images** - standard 1.44MB FAT12 floppy images
 - **Sector-Level Precision**: Writes directly to the image file without needing to mount it as a drive
-- **Smart Truncation**: Automatically converts long filenames (e.g., `My_Favorite_Song.mid`) to the hardware-compliant 8.3 format (`MY_FAVOR.MID`).
+- **Smart Truncation**: Automatically converts long filenames (e.g., `My_Favorite_Song.mid`) to the hardware-compliant 8.3 format (`MY_FAV~1.MID`) (Windows or no numeric tail option).
+- **VFAT Filename Displayed in Table** - Displays both long filenames and 8.3 short names as well as size and type
 - **Save floppy images** - save copies of floppy images
 - **Add files** - Drag any files or add file(s) with "Add Files" button
 - **Delete files** - Press Delete, Backspace key or use "Delete Selected" button
 - **Extract files** - Double-click or extract with "Extract Selected" button
 - **Sort columns** - Click any column header
 - **Disk space** - Real-time monitoring
+- **Boot Sector info** - View boot sector and EBPB information
+- **Root Directory info** - View complete root directory information with timestamps
 
 ### Settings
 - **Confirmations** - Toggle on/off for delete/replace
+- **Numeric Tails** - Toggle on/off for numeric tails (Windows-style vs. Linux truncation option)
 - **Persistent** - Settings saved between sessions
 - **Modern UI** - Native OS styling with PyQt
 
