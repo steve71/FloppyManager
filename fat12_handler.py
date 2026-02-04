@@ -114,9 +114,12 @@ class FAT12Image:
     
     def get_fat_entry(self, fat_data: bytearray, cluster: int) -> int:
         """Get FAT12 entry for a cluster"""
+        # Offset to the fat entry for the cluster
         offset = cluster + (cluster // 2)
         value = struct.unpack('<H', fat_data[offset:offset+2])[0]
         
+        # If the last bit of a binary number is 1, it is odd, else it is even
+        # If the cluster is odd, the value is in the upper 4 bits
         if cluster & 1:
             return value >> 4
         else:
@@ -124,9 +127,12 @@ class FAT12Image:
     
     def set_fat_entry(self, fat_data: bytearray, cluster: int, value: int):
         """Set FAT12 entry for a cluster"""
+        # Offset to the fat entry for the cluster
         offset = cluster + (cluster // 2)
         current = struct.unpack('<H', fat_data[offset:offset+2])[0]
         
+        # If the last bit of a binary number is 1, it is odd, else it is even
+        # If the cluster is odd, the value is in the upper 4 bits
         if cluster & 1:
             new_value = (current & 0x000F) | (value << 4)
         else:
