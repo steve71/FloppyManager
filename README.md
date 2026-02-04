@@ -4,7 +4,7 @@
 
 A modern GUI tool designed for managing FAT12 formatted floppy disk images (.img) used in Yamaha keyboards like the **DGX-500**, **PSR series**, and **Clavinova** or other vintage keyboards. Currently verified to work with Yamaha DGX-500.
 
-<img width="1127" height="789" alt="image" src="https://github.com/user-attachments/assets/ba029e0d-275b-4b28-88f4-4b3077d411e4" />
+<img width="747" height="563" alt="image" src="https://github.com/user-attachments/assets/0cf5c649-a6c9-44ee-84a0-a316d86565ad" />
 
 ---
 
