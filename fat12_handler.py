@@ -298,7 +298,7 @@ class FAT12Image:
         return free_clusters
     
     def get_existing_83_names(self) -> List[str]:
-        """Get list of all existing 8.3 names in the root directory"""
+        """Get list of all existing 8.3, 11 byte names (no dot) in the root directory"""
         names = []
         
         with open(self.image_path, 'rb') as f:
