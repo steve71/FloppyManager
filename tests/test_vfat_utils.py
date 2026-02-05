@@ -29,5 +29,8 @@ def test_83_name_generation():
     # Long name conversion (typical Windows behavior)
     long_name = "ThisIsALongFileName.txt"
     short_name = generate_83_name(long_name, use_numeric_tail=True)
+    assert short_name == "THISIS~1TXT"
     assert len(short_name) <= 12
     assert "~1" in short_name
+    short_name = generate_83_name(long_name, use_numeric_tail=False)
+    assert short_name == "THISISALTXT"
