@@ -246,6 +246,7 @@ class FAT12Image:
                     entries.append({
                         'name': display_name,
                         'short_name': short_name_83,
+                        'short_name_raw': entry_data[0:11].decode('ascii', errors='ignore'),  # Raw 11-byte short name
                         'size': size,
                         'cluster': cluster,
                         'index': i,
@@ -478,6 +479,140 @@ class FAT12Image:
         except Exception as e:
             print(f"Error deleting file: {e}")
             return False
+    
+    def rename_file(self, entry: dict, new_name: str, use_numeric_tail: bool = False) -> bool:
+        """Rename a file in the image
+        
+        Args:
+            entry: The file entry to rename
+            new_name: The new long filename
+            use_numeric_tail: Whether to use numeric tails for 8.3 name generation
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get existing 8.3 names (excluding the current file)
+            existing_83_names = self.get_existing_83_names()
+            
+            # Get the current short name from entry
+            current_short_name = entry['short_name_raw'] if 'short_name_raw' in entry else entry['short_name'].replace('.', '').ljust(11)
+            
+            # Remove current file's short name from the list
+            if current_short_name in existing_83_names:
+                existing_83_names.remove(current_short_name)
+            
+            # Generate new 8.3 name
+            new_short_name_83 = generate_83_name(new_name, existing_83_names, use_numeric_tail)
+            
+            # Determine if we need LFN entries
+            needs_lfn = self._needs_lfn(new_name, new_short_name_83)
+            
+            with open(self.image_path, 'r+b') as f:
+                # First, delete the old LFN entries (if any)
+                index = entry['index'] - 1
+                while index >= 0:
+                    f.seek(self.root_start + (index * 32))
+                    entry_data = f.read(32)
+                    
+                    # Check if this is an LFN entry
+                    if entry_data[11] == 0x0F:
+                        # Mark as deleted
+                        f.seek(self.root_start + (index * 32))
+                        f.write(b'\xE5')
+                        index -= 1
+                    else:
+                        break
+                
+                # Find space for new LFN entries (if needed)
+                if needs_lfn:
+                    lfn_entries = create_lfn_entries(new_name, new_short_name_83.encode('ascii'))
+                    num_lfn_entries = len(lfn_entries)
+                    
+                    # Find contiguous space for LFN entries + short entry
+                    # We'll reuse the current entry position for the short entry
+                    # and look for space before it for LFN entries
+                    short_entry_index = entry['index']
+                    lfn_start_index = short_entry_index - num_lfn_entries
+                    
+                    # Check if we have space
+                    if lfn_start_index < 0:
+                        # Need to find new space
+                        entries = self.read_root_directory()
+                        used_indices = set(e['index'] for e in entries)
+                        
+                        # Look for contiguous free space
+                        found = False
+                        for start_idx in range(self.root_entries - num_lfn_entries):
+                            # Check if we have num_lfn_entries + 1 contiguous free slots
+                            if all(i not in used_indices for i in range(start_idx, start_idx + num_lfn_entries + 1)):
+                                lfn_start_index = start_idx
+                                short_entry_index = start_idx + num_lfn_entries
+                                found = True
+                                break
+                        
+                        if not found:
+                            print("No space for LFN entries")
+                            return False
+                        
+                        # If we're moving the entry, we need to mark the old one as deleted
+                        if short_entry_index != entry['index']:
+                            f.seek(self.root_start + (entry['index'] * 32))
+                            f.write(b'\xE5')
+                    
+                    # Write LFN entries
+                    for i, lfn_entry in enumerate(lfn_entries):
+                        f.seek(self.root_start + ((lfn_start_index + i) * 32))
+                        f.write(lfn_entry)
+                    
+                    # Update the short entry position
+                    entry_index = short_entry_index
+                else:
+                    # No LFN needed, just update the short entry at its current position
+                    entry_index = entry['index']
+                
+                # Update the short entry with new name
+                f.seek(self.root_start + (entry_index * 32))
+                
+                # Read the current entry
+                current_entry = bytearray(f.read(32))
+                
+                # Update the short name (first 11 bytes)
+                current_entry[0:11] = new_short_name_83.encode('ascii')
+                
+                # Write back the entry
+                f.seek(self.root_start + (entry_index * 32))
+                f.write(current_entry)
+            
+            return True
+        except Exception as e:
+            print(f"Error renaming file: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _needs_lfn(self, long_name: str, short_name_83: str) -> bool:
+        """Check if a long filename needs LFN entries
+        
+        Args:
+            long_name: The long filename
+            short_name_83: The generated 8.3 name (11 bytes, no dot)
+            
+        Returns:
+            True if LFN entries are needed
+        """
+        from pathlib import Path
+        
+        # Convert short name to 8.3 format with dot for comparison
+        short_base = short_name_83[:8].rstrip()
+        short_ext = short_name_83[8:11].rstrip()
+        if short_ext:
+            short_name_dotted = f"{short_base}.{short_ext}"
+        else:
+            short_name_dotted = short_base
+        
+        # If the uppercase long name equals the short name, no LFN needed
+        return long_name.upper() != short_name_dotted.upper()
     
     def extract_file(self, entry: dict) -> bytes:
         """Extract file data from the image"""
