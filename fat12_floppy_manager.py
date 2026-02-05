@@ -1,0 +1,939 @@
+#!/usr/bin/env python3
+
+# Copyright (c) 2026 Stephen P Smith
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+"""
+FAT12 Floppy Disk Image Manager
+A modern GUI tool for managing files on FAT12 floppy disk images with VFAT LFN support
+"""
+
+import sys
+import os
+import shutil
+from pathlib import Path
+from typing import Optional
+
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QTableWidget, QTableWidgetItem, QFileDialog,
+    QMessageBox, QLabel, QStatusBar, QMenuBar, QMenu, QHeaderView,
+    QDialog, QTabWidget
+)
+from PyQt6.QtCore import Qt, QSettings, QTimer
+from PyQt6.QtGui import QIcon, QAction, QKeySequence
+
+# Import the FAT12 handler
+from fat12_handler import FAT12Image
+from gui_components import BootSectorViewer, RootDirectoryViewer
+
+class FloppyManagerWindow(QMainWindow):
+    """Main window for the floppy manager"""
+
+    def __init__(self, image_path: Optional[str] = None):
+        super().__init__()
+
+        # Settings
+        self.settings = QSettings('FAT12FloppyManager', 'Settings')
+        self.confirm_delete = self.settings.value('confirm_delete', True, type=bool)
+        self.confirm_replace = self.settings.value('confirm_replace', True, type=bool)
+        self.use_numeric_tail = self.settings.value('use_numeric_tail', False, type=bool)
+
+        # Restore window geometry if available
+        geometry = self.settings.value('window_geometry')
+        if geometry:
+            self.restoreGeometry(geometry)
+
+        self.image_path = image_path
+        self.image = None
+
+        self.setup_ui()
+
+        # Load image if provided or restore last image
+        if image_path:
+            self.load_image(image_path)
+        else:
+            # Try to restore last opened image
+            last_image = self.settings.value('last_image_path', '')
+            if last_image and Path(last_image).exists():
+                self.load_image(last_image)
+            else:
+                # No image loaded, show empty state
+                self.status_bar.showMessage("No image loaded. Create new or open existing image.")
+
+    def setup_ui(self):
+        """Create the user interface"""
+        self.setWindowTitle("FAT12 Floppy Manager")
+        self.setGeometry(100, 100, 1000, 600)
+
+        # Enable drag and drop
+        self.setAcceptDrops(True)
+
+        # Set window icon if available
+        icon_path = Path(__file__).parent / 'floppy_icon.ico'
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+
+        # Create menu bar
+        self.create_menus()
+
+        # Central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        # Main layout
+        layout = QVBoxLayout(central_widget)
+
+        # Top toolbar
+        toolbar = QHBoxLayout()
+
+        # Buttons
+        self.add_btn = QPushButton("📁 Add Files")
+        self.add_btn.setToolTip("Add files to the floppy image")
+        self.add_btn.clicked.connect(self.add_files)
+
+        self.extract_btn = QPushButton("💾 Extract Selected")
+        self.extract_btn.setToolTip("Extract selected files to your computer")
+        self.extract_btn.clicked.connect(self.extract_selected)
+
+        self.delete_btn = QPushButton("🗑️ Delete Selected")
+        self.delete_btn.setToolTip("Delete selected files (or press Delete key)")
+        self.delete_btn.clicked.connect(self.delete_selected)
+
+        self.refresh_btn = QPushButton("🔄 Refresh")
+        self.refresh_btn.setToolTip("Reload the file list")
+        self.refresh_btn.clicked.connect(self.refresh_file_list)
+
+        toolbar.addWidget(self.add_btn)
+        toolbar.addWidget(self.extract_btn)
+        toolbar.addWidget(self.delete_btn)
+        toolbar.addWidget(self.refresh_btn)
+        toolbar.addStretch()
+
+        # Info label
+        self.info_label = QLabel()
+        self.info_label.setStyleSheet("QLabel { color: #555; font-weight: bold; }")
+        toolbar.addWidget(self.info_label)
+
+        layout.addLayout(toolbar)
+
+        # File table - now with 5 columns
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(['Filename', 'Short Name (8.3)', 'Size', 'Type', 'Index'])
+
+        # Hide the index column (used internally)
+        self.table.setColumnHidden(4, True)
+
+        # Configure table
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSortingEnabled(True)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+        # Set column widths
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Filename
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Short name
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Size
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Type
+
+        # Track clicks for inline rename
+        self.last_clicked_item = None
+        self.last_click_time = 0
+        self.currently_editing = False
+        self.original_name_before_edit = None
+        self.table.itemClicked.connect(self.handle_item_clicked)
+        self.table.itemChanged.connect(self.handle_item_changed)
+
+        # Double-click to extract
+        self.table.doubleClicked.connect(self.extract_selected)
+
+        # Context menu
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
+
+        layout.addWidget(self.table)
+
+        # Status bar
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Ready | Tip: Drag and drop files to add them to the floppy")
+
+        # Keyboard shortcuts
+        self.table.keyPressEvent = self.table_key_press
+
+    def show_context_menu(self, position):
+        """Show context menu for table"""
+        if not self.image:
+            return
+
+        selected_rows = set(item.row() for item in self.table.selectedItems())
+        if not selected_rows:
+            return
+
+        menu = QMenu()
+        
+        extract_action = QAction("Extract", self)
+        extract_action.triggered.connect(self.extract_selected)
+        menu.addAction(extract_action)
+        
+        if len(selected_rows) == 1:
+            rename_action = QAction("Rename (F2)", self)
+            rename_action.triggered.connect(self.rename_selected)
+            menu.addAction(rename_action)
+        
+        menu.addSeparator()
+        
+        delete_action = QAction("Delete", self)
+        delete_action.triggered.connect(self.delete_selected)
+        menu.addAction(delete_action)
+        
+        menu.exec(self.table.viewport().mapToGlobal(position))
+
+    def create_menus(self):
+        """Create menu bar"""
+        menubar = self.menuBar()
+
+        # File menu
+        file_menu = menubar.addMenu("&File")
+
+        new_action = QAction("&New Image...", self)
+        new_action.setShortcut(QKeySequence.StandardKey.New)
+        new_action.setToolTip("Create a new blank floppy disk image")
+        new_action.triggered.connect(self.create_new_image)
+        file_menu.addAction(new_action)
+
+        open_action = QAction("&Open Image...", self)
+        open_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_action.triggered.connect(self.open_image)
+        file_menu.addAction(open_action)
+
+        file_menu.addSeparator()
+
+        save_as_action = QAction("Save Image &As...", self)
+        save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
+        save_as_action.setToolTip("Save a copy of the current image")
+        save_as_action.triggered.connect(self.save_image_as)
+        file_menu.addAction(save_as_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction("E&xit", self)
+        exit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # Edit menu
+        edit_menu = menubar.addMenu("&Edit")
+
+        rename_action = QAction("&Rename File...", self)
+        rename_action.setShortcut(QKeySequence("F2"))
+        rename_action.setToolTip("Rename the selected file")
+        rename_action.triggered.connect(self.rename_selected)
+        edit_menu.addAction(rename_action)
+
+        # View menu
+        view_menu = menubar.addMenu("&View")
+
+        boot_sector_action = QAction("&Boot Sector && EBPB Information...", self)
+        boot_sector_action.setToolTip("View complete boot sector and EBPB details")
+        boot_sector_action.triggered.connect(self.show_boot_sector_info)
+        view_menu.addAction(boot_sector_action)
+
+        root_dir_action = QAction("&Root Directory Information...", self)
+        root_dir_action.setToolTip("View complete root directory details")
+        root_dir_action.triggered.connect(self.show_root_directory_info)
+        view_menu.addAction(root_dir_action)
+
+        # Settings menu
+        settings_menu = menubar.addMenu("&Settings")
+
+        self.confirm_delete_action = QAction("Confirm before deleting", self)
+        self.confirm_delete_action.setCheckable(True)
+        self.confirm_delete_action.setChecked(self.confirm_delete)
+        self.confirm_delete_action.triggered.connect(self.toggle_confirm_delete)
+        settings_menu.addAction(self.confirm_delete_action)
+
+        self.confirm_replace_action = QAction("Confirm before replacing files", self)
+        self.confirm_replace_action.setCheckable(True)
+        self.confirm_replace_action.setChecked(self.confirm_replace)
+        self.confirm_replace_action.triggered.connect(self.toggle_confirm_replace)
+        settings_menu.addAction(self.confirm_replace_action)
+
+        settings_menu.addSeparator()
+
+        self.use_numeric_tail_action = QAction("Use numeric tails for 8.3 names (~1, ~2, etc.)", self)
+        self.use_numeric_tail_action.setCheckable(True)
+        self.use_numeric_tail_action.setChecked(self.use_numeric_tail)
+        self.use_numeric_tail_action.setToolTip("When enabled, uses Windows-style numeric tails (e.g., LONGFI~1.TXT). When disabled, simply truncates names (like Linux nonumtail option).")
+        self.use_numeric_tail_action.triggered.connect(self.toggle_numeric_tail)
+        settings_menu.addAction(self.use_numeric_tail_action)
+
+        # Help menu
+        help_menu = menubar.addMenu("&Help")
+
+        about_action = QAction("&About", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+
+    def toggle_confirm_delete(self):
+        """Toggle delete confirmation"""
+        self.confirm_delete = self.confirm_delete_action.isChecked()
+        self.settings.setValue('confirm_delete', self.confirm_delete)
+
+    def toggle_confirm_replace(self):
+        """Toggle replace confirmation"""
+        self.confirm_replace = self.confirm_replace_action.isChecked()
+        self.settings.setValue('confirm_replace', self.confirm_replace)
+
+    def toggle_numeric_tail(self):
+        """Toggle numeric tail usage for 8.3 name generation"""
+        self.use_numeric_tail = self.use_numeric_tail_action.isChecked()
+        self.settings.setValue('use_numeric_tail', self.use_numeric_tail)
+        
+        # Show info message
+        if self.use_numeric_tail:
+            mode_desc = "Windows-style numeric tails enabled (e.g., LONGFI~1.TXT)"
+        else:
+            mode_desc = "Simple truncation mode enabled (like Linux nonumtail)"
+        
+        self.status_bar.showMessage(f"8.3 name generation: {mode_desc}")
+
+    def table_key_press(self, event):
+        """Handle keyboard events in the table"""
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self.delete_selected()
+        elif event.key() == Qt.Key.Key_F2:
+            self.rename_selected()
+        elif event.key() == Qt.Key.Key_Escape:
+            # Cancel editing if in progress
+            if self.currently_editing and self.original_name_before_edit:
+                current_item = self.table.currentItem()
+                if current_item and current_item.column() == 0:
+                    current_item.setText(self.original_name_before_edit)
+                    self.currently_editing = False
+                    self.original_name_before_edit = None
+                    self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            # Call the original keyPressEvent
+            QTableWidget.keyPressEvent(self.table, event)
+        else:
+            # Call the original keyPressEvent
+            QTableWidget.keyPressEvent(self.table, event)
+
+    def handle_item_clicked(self, item):
+        """Handle item click for inline rename (Windows-style)"""
+        import time
+        
+        # Only handle clicks on the filename column
+        if item.column() != 0:
+            return
+        
+        # Check if this is a second click on the same item (not a double-click)
+        current_time = time.time()
+        time_since_last_click = current_time - self.last_click_time
+        
+        # Time window: more than 0.3s (to avoid double-click) but less than 1.5s
+        if (self.last_clicked_item == item and 
+            0.3 < time_since_last_click < 1.5 and
+            self.image and
+            not self.currently_editing):
+            
+            # Store original name before editing
+            self.original_name_before_edit = item.text()
+            self.currently_editing = True
+            
+            # Enable editing for this item
+            self.table.setEditTriggers(QTableWidget.EditTrigger.SelectedClicked)
+            self.table.editItem(item)
+            
+        self.last_clicked_item = item
+        self.last_click_time = current_time
+
+    def handle_item_changed(self, item):
+        """Handle inline rename when user finishes editing"""
+        # Only handle changes to filename column when we're actually editing
+        if item.column() != 0 or not self.currently_editing:
+            return
+        
+        # Mark that we're no longer editing
+        self.currently_editing = False
+        
+        # Disable editing again
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        
+        if not self.image:
+            return
+        
+        new_name = item.text().strip()
+        
+        # Get the entry index from the hidden column
+        row = item.row()
+        index_item = self.table.item(row, 4)
+        
+        # Check if index item exists
+        if not index_item:
+            return
+            
+        entry_index = int(index_item.text())
+        
+        entries = self.image.read_root_directory()
+        entry = next((e for e in entries if e['index'] == entry_index), None)
+        
+        if not entry:
+            return
+        
+        # Check if name actually changed
+        if new_name.upper() == entry['name'].upper():
+            self.original_name_before_edit = None
+            return
+        
+        # Validate name
+        if not new_name:
+            QMessageBox.warning(self, "Invalid Name", "Filename cannot be empty.")
+            # Restore original name
+            if self.original_name_before_edit:
+                item.setText(self.original_name_before_edit)
+            self.original_name_before_edit = None
+            return
+        
+        # Check for duplicates
+        existing_names = [e['name'].upper() for e in entries if e['index'] != entry_index]
+        if new_name.upper() in existing_names:
+            QMessageBox.warning(
+                self,
+                "Name Conflict",
+                f"A file named '{new_name}' already exists."
+            )
+            # Restore original name
+            if self.original_name_before_edit:
+                item.setText(self.original_name_before_edit)
+            self.original_name_before_edit = None
+            return
+        
+        # Perform rename
+        try:
+            if self.image.rename_file(entry, new_name, self.use_numeric_tail):
+                self.original_name_before_edit = None
+                self.refresh_file_list()
+                self.status_bar.showMessage(f"Renamed '{entry['name']}' to '{new_name}'")
+                
+                # Show information about the new short name
+                entries = self.image.read_root_directory()
+                renamed_entry = next((e for e in entries if e['name'].upper() == new_name.upper()), None)
+                if renamed_entry:
+                    self.status_bar.showMessage(
+                        f"Renamed to: {new_name} (8.3: {renamed_entry['short_name']})"
+                    )
+            else:
+                QMessageBox.critical(self, "Error", "Failed to rename file")
+                # Restore original name
+                if self.original_name_before_edit:
+                    item.setText(self.original_name_before_edit)
+                self.original_name_before_edit = None
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to rename file: {e}")
+            # Restore original name
+            if self.original_name_before_edit:
+                item.setText(self.original_name_before_edit)
+            self.original_name_before_edit = None
+
+    def load_image(self, filepath: str):
+        """Load a floppy disk image"""
+        try:
+            self.image = FAT12Image(filepath)
+            self.image_path = filepath
+            self.setWindowTitle(f"FAT12 Floppy Manager - {Path(filepath).name}")
+
+            # Save as last opened image
+            self.settings.setValue('last_image_path', filepath)
+
+            self.refresh_file_list()
+            self.status_bar.showMessage(f"Loaded: {Path(filepath).name}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load image: {e}")
+            self.image = None
+            self.image_path = None
+            self.setWindowTitle("FAT12 Floppy Manager")
+
+    def refresh_file_list(self):
+        """Refresh the file list from the image"""
+        self.table.setRowCount(0)
+
+        if not self.image:
+            self.info_label.setText("No image loaded")
+            return
+
+        try:
+            entries = self.image.read_root_directory()
+
+            for entry in entries:
+                if not entry['is_dir']:
+                    row = self.table.rowCount()
+                    self.table.insertRow(row)
+
+                    # Filename (long name) - EDITABLE
+                    filename_item = QTableWidgetItem(entry['name'])
+                    filename_item.setFlags(filename_item.flags() | Qt.ItemFlag.ItemIsEditable)
+                    self.table.setItem(row, 0, filename_item)
+
+                    # Short name (8.3) - READ ONLY
+                    short_name_item = QTableWidgetItem(entry['short_name'])
+                    short_name_item.setFlags(short_name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.table.setItem(row, 1, short_name_item)
+
+                    # Size - READ ONLY
+                    size_str = f"{entry['size']:,} bytes"
+                    size_item = QTableWidgetItem(size_str)
+                    size_item.setFlags(size_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.table.setItem(row, 2, size_item)
+
+                    # Type - READ ONLY
+                    file_type = Path(entry['name']).suffix.upper().lstrip('.')
+                    type_item = QTableWidgetItem(file_type)
+                    type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.table.setItem(row, 3, type_item)
+
+                    # Index (hidden) - READ ONLY
+                    index_item = QTableWidgetItem(str(entry['index']))
+                    index_item.setFlags(index_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.table.setItem(row, 4, index_item)
+
+            # Update info
+            free_clusters = len(self.image.find_free_clusters())
+            free_space = free_clusters * self.image.bytes_per_cluster
+            self.info_label.setText(f"{len(entries)} files | {free_space:,} bytes free")
+            self.status_bar.showMessage(f"Loaded {len(entries)} files")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to read directory: {e}")
+
+    def show_boot_sector_info(self):
+        """Show boot sector and EBPB information"""
+        if not self.image:
+            QMessageBox.information(
+                self, 
+                "No Image Loaded", 
+                "Please load or create a floppy image first."
+            )
+            return
+        
+        viewer = BootSectorViewer(self.image, self)
+        viewer.exec()
+
+    def show_root_directory_info(self):
+        """Show complete root directory information"""
+        if not self.image:
+            QMessageBox.information(
+                self, 
+                "No Image Loaded", 
+                "Please load or create a floppy image first."
+            )
+            return
+        
+        viewer = RootDirectoryViewer(self.image, self)
+        viewer.exec()
+
+    def add_files(self):
+        """Add files to the image via file dialog"""
+        if not self.image:
+            QMessageBox.information(
+                self,
+                "No Image Loaded",
+                "Please create a new image or open an existing one first."
+            )
+            return
+
+        filenames, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select files to add",
+            "",
+            "All files (*.*)"
+        )
+
+        if not filenames:
+            return
+
+        self.add_files_from_list(filenames)
+
+    def add_files_from_list(self, filenames: list):
+        """Add files from a list of file paths (used by both dialog and drag-drop)"""
+        if not self.image:
+            return
+
+        success_count = 0
+        fail_count = 0
+
+        for filepath in filenames:
+            try:
+                with open(filepath, 'rb') as f:
+                    data = f.read()
+
+                path_obj = Path(filepath)
+                original_name = path_obj.name
+
+                # Get existing 8.3 names
+                existing_83_names = self.image.get_existing_83_names()
+                
+                # Generate the 8.3 name that will be used
+                short_name_83 = FAT12Image.generate_83_name(
+                    original_name, 
+                    existing_83_names, 
+                    self.use_numeric_tail
+                )
+                
+                # Format 8.3 name for display (add dot back)
+                short_display = short_name_83[:8].strip() + '.' + short_name_83[8:11].strip()
+                short_display = short_display.rstrip('.')
+
+                # Check if file already exists
+                existing_entries = self.image.read_root_directory()
+                collision_entry = None
+                
+                # Check both long name and short name
+                for e in existing_entries:
+                    e_short_83 = e['short_name'].replace('.', '').ljust(11).upper()
+                    if e_short_83 == short_name_83:
+                        collision_entry = e
+                        break
+
+                if collision_entry:
+                    if self.confirm_replace:
+                        msg = f"The file '{original_name}' will be saved with 8.3 name '{short_display}', which already exists"
+                        if collision_entry['name'] != collision_entry['short_name']:
+                            msg += f" (long name: '{collision_entry['name']}')"
+                        msg += ".\n\nDo you want to replace it?"
+                        
+                        response = QMessageBox.question(
+                            self,
+                            "File Exists",
+                            msg,
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                        )
+                        if response == QMessageBox.StandardButton.No:
+                            continue
+
+                    # Delete the existing file
+                    self.image.delete_file(collision_entry)
+
+                # Write the new file
+                if self.image.write_file_to_image(original_name, data, self.use_numeric_tail):
+                    success_count += 1
+                else:
+                    fail_count += 1
+                    QMessageBox.warning(
+                        self,
+                        "Error",
+                        f"Failed to write {original_name} - disk may be full"
+                    )
+
+            except Exception as e:
+                fail_count += 1
+                QMessageBox.critical(self, "Error", f"Failed to add {Path(filepath).name}: {e}")
+
+        self.refresh_file_list()
+
+        if success_count > 0:
+            self.status_bar.showMessage(f"Added {success_count} file(s)")
+        if fail_count > 0:
+            QMessageBox.warning(self, "Warning", f"Failed to add {fail_count} file(s)")
+
+    def extract_selected(self):
+        """Extract selected files"""
+        if not self.image:
+            QMessageBox.information(self, "No Image Loaded", "No image loaded.")
+            return
+
+        selected_rows = set(item.row() for item in self.table.selectedItems())
+
+        if not selected_rows:
+            QMessageBox.information(self, "Info", "Please select files to extract")
+            return
+
+        save_dir = QFileDialog.getExistingDirectory(self, "Select folder to save files")
+        if not save_dir:
+            return
+
+        entries = self.image.read_root_directory()
+        success_count = 0
+
+        for row in selected_rows:
+            entry_index = int(self.table.item(row, 4).text())
+            entry = next((e for e in entries if e['index'] == entry_index), None)
+
+            if entry:
+                try:
+                    data = self.image.extract_file(entry)
+                    # Use the long filename (original name) when extracting
+                    output_path = os.path.join(save_dir, entry['name'])
+
+                    with open(output_path, 'wb') as f:
+                        f.write(data)
+
+                    success_count += 1
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to extract {entry['name']}: {e}")
+
+        if success_count > 0:
+            self.status_bar.showMessage(f"Extracted {success_count} file(s) to {save_dir}")
+            QMessageBox.information(self, "Success", f"Extracted {success_count} file(s)")
+
+    def delete_selected(self):
+        """Delete selected files"""
+        if not self.image:
+            QMessageBox.information(self, "No Image Loaded", "No image loaded.")
+            return
+
+        selected_rows = set(item.row() for item in self.table.selectedItems())
+
+        if not selected_rows:
+            QMessageBox.information(self, "Info", "Please select files to delete")
+            return
+
+        if self.confirm_delete:
+            response = QMessageBox.question(
+                self,
+                "Confirm Delete",
+                f"Delete {len(selected_rows)} file(s) from the disk image?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
+            if response == QMessageBox.StandardButton.No:
+                return
+
+        entries = self.image.read_root_directory()
+        success_count = 0
+
+        for row in selected_rows:
+            entry_index = int(self.table.item(row, 4).text())
+            entry = next((e for e in entries if e['index'] == entry_index), None)
+
+            if entry:
+                if self.image.delete_file(entry):
+                    success_count += 1
+                else:
+                    QMessageBox.critical(self, "Error", f"Failed to delete {entry['name']}")
+
+        self.refresh_file_list()
+
+        if success_count > 0:
+            self.status_bar.showMessage(f"Deleted {success_count} file(s)")
+
+    def rename_selected(self):
+        """Start inline editing for the selected file"""
+        if not self.image:
+            QMessageBox.information(self, "No Image Loaded", "No image loaded.")
+            return
+
+        selected_rows = set(item.row() for item in self.table.selectedItems())
+
+        if not selected_rows:
+            QMessageBox.information(self, "Info", "Please select a file to rename")
+            return
+
+        if len(selected_rows) > 1:
+            QMessageBox.information(self, "Info", "Please select only one file to rename")
+            return
+
+        row = list(selected_rows)[0]
+        filename_item = self.table.item(row, 0)
+        
+        if filename_item:
+            # Enable editing and start editing the filename
+            self.table.setEditTriggers(QTableWidget.EditTrigger.SelectedClicked)
+            self.table.editItem(filename_item)
+
+    def create_new_image(self):
+        """Create a new blank floppy disk image"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Create New Floppy Image",
+            "",
+            "Floppy images (*.img);;All files (*.*)"
+        )
+
+        if not filename:
+            return
+
+        # Ensure .img extension
+        if not filename.lower().endswith('.img'):
+            filename += '.img'
+
+        try:
+            # Create a blank 1.44MB floppy image using the handler
+            FAT12Image.create_blank_image(filename)
+
+            # Load the new image
+            self.load_image(filename)
+
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Created new floppy image:\n{Path(filename).name}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to create image: {e}")
+
+    def save_image_as(self):
+        """Save a copy of the current floppy image"""
+        if not self.image:
+            QMessageBox.information(self, "Info", "No image loaded to save")
+            return
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Image As",
+            Path(self.image_path).name if self.image_path else "floppy.img",
+            "Floppy images (*.img);;All files (*.*)"
+        )
+
+        if not filename:
+            return
+
+        # Ensure .img extension
+        if not filename.lower().endswith('.img'):
+            filename += '.img'
+
+        try:
+            # Copy the current image file
+            shutil.copy2(self.image_path, filename)
+
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Image saved as:\n{Path(filename).name}"
+            )
+
+            self.status_bar.showMessage(f"Saved as: {Path(filename).name}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save image: {e}")
+
+    def open_image(self):
+        """Open a different floppy image"""
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select FAT12 Floppy Image",
+            "",
+            "Floppy images (*.img *.ima);;All files (*.*)"
+        )
+
+        if filename:
+            self.load_image(filename)
+
+    def show_about(self):
+        """Show about dialog"""
+        about_text = """<h2>FAT12 Floppy Manager</h2>
+        <p><b>Version 2.1</b></p>
+
+        <p>A modern tool for managing files on FAT12 floppy disk images with VFAT long filename support.</p>
+
+        <p><b>Features:</b></p>
+        <ul>
+        <li>FAT12 filesystem support with VFAT long filenames</li>
+        <li>Windows-compatible 8.3 name generation with numeric tails</li>
+        <li>Toggleable numeric tail mode (Windows-style vs. simple truncation)</li>
+        <li>Rename files with automatic 8.3 short name generation</li>
+        <li>Create new blank floppy images</li>
+        <li>Writes directly to the image file without needing to mount it as a drive</li>
+        <li>Displays both long filenames and 8.3 short names</li>
+        <li>Save copies of floppy images</li>
+        <li>Drag and drop files to add them</li>
+        <li>Delete files (press Del key)</li>
+        <li>Extract files with original long names</li>
+        <li>View boot sector and EBPB information</li>
+        <li>View complete root directory information with timestamps</li>
+        <li>Remembers last opened image and settings</li>
+        </ul>
+
+        <p><b>Keyboard Shortcuts:</b></p>
+        <ul>
+        <li>Ctrl+N - Create new image</li>
+        <li>Ctrl+O - Open image</li>
+        <li>Ctrl+Shift+S - Save image as</li>
+        <li>F2 or click twice on filename - Rename file inline</li>
+        <li>Del/Backspace - Delete selected files</li>
+        <li>Double-click - Extract file</li>
+        </ul>
+
+        <p><small>© 2026 Stephen P Smith | MIT License</small></p>
+        """
+        QMessageBox.about(self, "About", about_text)
+
+    def closeEvent(self, event):
+        """Handle window close event - save state"""
+        # Save window geometry
+        self.settings.setValue('window_geometry', self.saveGeometry())
+        event.accept()
+
+    def dragEnterEvent(self, event):
+        """Handle drag enter event"""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        """Handle drop event - add files to floppy"""
+        if not self.image:
+            QMessageBox.information(
+                self,
+                "No Image Loaded",
+                "Please create a new image or open an existing one first."
+            )
+            event.ignore()
+            return
+
+        # Get dropped files
+        files = []
+        for url in event.mimeData().urls():
+            filepath = url.toLocalFile()
+            if filepath and Path(filepath).is_file():
+                files.append(filepath)
+
+        if not files:
+            event.ignore()
+            return
+
+        event.acceptProposedAction()
+
+        # Add files using existing method
+        self.add_files_from_list(files)
+
+
+def main():
+    """Main entry point"""
+    app = QApplication(sys.argv)
+    app.setApplicationName("FAT12 Floppy Manager")
+    app.setOrganizationName("FAT12FloppyManager")
+
+    # Set application style
+    app.setStyle('Fusion')
+
+    # Create main window
+    window = FloppyManagerWindow()
+    window.show()
+
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
