@@ -386,3 +386,53 @@ class TestEntryChains:
         # Test invalid index
         assert get_raw_entry_chain(raw_entries, 99) == []
         assert get_raw_entry_chain(raw_entries, -1) == []
+
+
+class TestFilenameSplitting:
+    def test_split_filename_for_editing(self):
+        from vfat_utils import split_filename_for_editing
+        
+        # Standard file with extension
+        full, start, end = split_filename_for_editing("document.txt")
+        assert full == "document.txt"
+        assert start == 0
+        assert end == 8
+        assert full[start:end] == "document"
+        
+        # Multiple dots - select up to last dot
+        full, start, end = split_filename_for_editing("archive.tar.gz")
+        assert full == "archive.tar.gz"
+        assert start == 0
+        assert end == 11
+        assert full[start:end] == "archive.tar"
+        
+        # No extension
+        full, start, end = split_filename_for_editing("README")
+        assert full == "README"
+        assert start == 0
+        assert end == 6
+        assert full[start:end] == "README"
+        
+        # Dotfile (Unix hidden file) - select all
+        full, start, end = split_filename_for_editing(".gitignore")
+        assert full == ".gitignore"
+        assert start == 0
+        assert end == 10
+        assert full[start:end] == ".gitignore"
+        
+        # Edge cases
+        full, start, end = split_filename_for_editing(".")
+        assert full == "."
+        assert start == 0
+        assert end == 1
+        
+        full, start, end = split_filename_for_editing("..")
+        assert full == ".."
+        assert start == 0
+        assert end == 2
+        
+        # Empty string
+        full, start, end = split_filename_for_editing("")
+        assert full == ""
+        assert start == 0
+        assert end == 0

@@ -410,3 +410,38 @@ def get_raw_entry_chain(raw_entries: List[Tuple[int, bytes]], target_index: int)
             break
             
     return chain
+
+
+def split_filename_for_editing(filename: str) -> Tuple[str, int, int]:
+    """Split filename into parts for inline editing (Windows-style).
+    
+    Returns (full_name, selection_start, selection_end) where:
+    - full_name is the complete filename
+    - selection_start is the index where to start selection (0)
+    - selection_end is the index where to end selection (before extension if present)
+    
+    Windows behavior:
+    - "document.txt" -> select "document" (0, 8)
+    - "archive.tar.gz" -> select "archive.tar" (0, 11)
+    - "README" -> select "README" (0, 6)
+    - ".gitignore" -> select ".gitignore" (0, 10) - special case for dotfiles
+    
+    Args:
+        filename: The filename to split
+    
+    Returns:
+        Tuple of (full_name, start_index, end_index)
+    """
+    # Handle edge cases
+    if not filename or filename == '.' or filename == '..':
+        return filename, 0, len(filename)
+    
+    # Find the last dot
+    last_dot_pos = filename.rfind('.')
+    
+    # If no dot or dot is at the beginning (hidden file in Unix), select all
+    if last_dot_pos <= 0:
+        return filename, 0, len(filename)
+    
+    # Select everything before the last dot
+    return filename, 0, last_dot_pos

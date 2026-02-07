@@ -31,7 +31,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from vfat_utils import format_83_name
+from vfat_utils import format_83_name, split_filename_for_editing
 
 
 from PyQt6.QtWidgets import (
@@ -164,6 +164,10 @@ class FloppyManagerWindow(QMainWindow):
         self.table.setSortingEnabled(True)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
+        # Track editing state
+        self._editing_in_progress = False
+        self.table.itemChanged.connect(self.on_item_changed)
+
         # Set column widths
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Filename
@@ -198,6 +202,14 @@ class FloppyManagerWindow(QMainWindow):
             return
 
         menu = QMenu()
+        
+        # Only show rename if exactly one file is selected
+        if len(selected_rows) == 1:
+            rename_action = QAction("Rename", self)
+            rename_action.setShortcut(Qt.Key.Key_F2)
+            rename_action.triggered.connect(self.start_rename)
+            menu.addAction(rename_action)
+            menu.addSeparator()
         
         extract_action = QAction("Extract", self)
         extract_action.triggered.connect(self.extract_selected)
@@ -250,6 +262,15 @@ class FloppyManagerWindow(QMainWindow):
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+        # Edit menu
+        edit_menu = menubar.addMenu("&Edit")
+
+        rename_action = QAction("&Rename", self)
+        rename_action.setShortcut(Qt.Key.Key_F2)
+        rename_action.setToolTip("Rename selected file (F2)")
+        rename_action.triggered.connect(self.start_rename)
+        edit_menu.addAction(rename_action)
 
         # View menu
         view_menu = menubar.addMenu("&View")
@@ -934,6 +955,154 @@ class FloppyManagerWindow(QMainWindow):
         # Add files using existing method
         self.add_files_from_list(files)
 
+
+
+    def start_rename(self):
+        """Start inline renaming of the selected file (Windows-style)"""
+        if not self.image:
+            return
+        
+        # Get selected row
+        selected_rows = set(item.row() for item in self.table.selectedItems())
+        if len(selected_rows) != 1:
+            QMessageBox.information(
+                self,
+                "Select One File",
+                "Please select exactly one file to rename."
+            )
+            return
+        
+        row = list(selected_rows)[0]
+        filename_item = self.table.item(row, 0)
+        
+        if not filename_item:
+            return
+        
+        # Enable editing on the filename column
+        self.table.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
+        
+        # Enter edit mode
+        self.table.editItem(filename_item)
+        
+        # Get the line edit widget that was created and select filename without extension
+        QTimer.singleShot(0, lambda: self.select_filename_without_extension(filename_item))
+    
+    def select_filename_without_extension(self, item):
+        """Select only the filename part, excluding the extension (Windows behavior)"""
+        editor = self.table.cellWidget(item.row(), item.column())
+        if not editor:
+            # Try to get the item delegate's editor
+            from PyQt6.QtWidgets import QLineEdit
+            for child in self.table.children():
+                if isinstance(child, QLineEdit) and child.isVisible():
+                    editor = child
+                    break
+        
+        if editor:
+            filename = item.text()
+            full_name, start, end = split_filename_for_editing(filename)
+            editor.setSelection(start, end - start)
+    
+    def on_item_changed(self, item):
+        """Handle item changes (when rename is completed)"""
+        if self._editing_in_progress:
+            return
+        
+        # Only process changes to the filename column (column 0)
+        if item.column() != 0:
+            return
+        
+        self._editing_in_progress = True
+        
+        # Defer the actual processing to avoid interfering with Qt's editing lifecycle
+        QTimer.singleShot(0, lambda: self.process_rename(item))
+    
+    def process_rename(self, item):
+        """Process the rename after Qt's editing lifecycle completes"""
+        try:
+            # Disable editing again
+            self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            
+            new_name = item.text().strip()
+            row = item.row()
+            
+            # Get the entry index from the hidden column
+            index_item = self.table.item(row, 4)
+            if not index_item:
+                self._editing_in_progress = False
+                return
+            
+            entry_index = int(index_item.text())
+            
+            # Get the entry from the image
+            entries = self.image.read_root_directory()
+            entry = None
+            for e in entries:
+                if e['index'] == entry_index:
+                    entry = e
+                    break
+            
+            if not entry:
+                self._editing_in_progress = False
+                return
+            
+            old_name = entry['name']
+            
+            # Check if name actually changed
+            if new_name == old_name:
+                self._editing_in_progress = False
+                return
+            
+            # Validate new name
+            if not new_name:
+                QMessageBox.warning(
+                    self,
+                    "Invalid Name",
+                    "Filename cannot be empty."
+                )
+                # Temporarily disconnect to avoid recursion
+                self.table.itemChanged.disconnect(self.on_item_changed)
+                item.setText(old_name)
+                self.table.itemChanged.connect(self.on_item_changed)
+                self._editing_in_progress = False
+                return
+            
+            # Check for invalid characters in FAT12
+            invalid_chars = '<>:"|?*\\/\x00'
+            if any(c in new_name for c in invalid_chars):
+                QMessageBox.warning(
+                    self,
+                    "Invalid Name",
+                    f"Filename cannot contain these characters: {invalid_chars}"
+                )
+                # Temporarily disconnect to avoid recursion
+                self.table.itemChanged.disconnect(self.on_item_changed)
+                item.setText(old_name)
+                self.table.itemChanged.connect(self.on_item_changed)
+                self._editing_in_progress = False
+                return
+            
+            # Attempt the rename
+            success = self.image.rename_file(entry, new_name, self.use_numeric_tail)
+            
+            if success:
+                self.status_bar.showMessage(f"Renamed '{old_name}' to '{new_name}'")
+                # Refresh the file list to show the new name and short name
+                self.refresh_file_list()
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Rename Failed",
+                    f"Could not rename '{old_name}' to '{new_name}'.\n\n"
+                    "The root directory may be full or another error occurred."
+                )
+                # Temporarily disconnect to avoid recursion
+                self.table.itemChanged.disconnect(self.on_item_changed)
+                item.setText(old_name)
+                self.table.itemChanged.connect(self.on_item_changed)
+        
+        finally:
+            self._editing_in_progress = False
 
 def main():
     """Main entry point"""
