@@ -499,7 +499,11 @@ class FAT12Image:
 
             # Generate and format new 8.3 name (11 bytes raw)
             short_name_11 = generate_83_name(new_name, existing_names, use_numeric_tail)
-            raw_short_name = short_name_11.encode('ascii')[:11]
+            
+            try:
+                raw_short_name = short_name_11.encode('ascii')[:11]
+            except UnicodeEncodeError:
+                raw_short_name = short_name_11.encode('ascii', 'ignore').ljust(11, b' ')[:11]
 
             # Generate LFN entries if needed
             base = short_name_11[:8].strip()

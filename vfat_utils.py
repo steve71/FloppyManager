@@ -48,7 +48,7 @@ def is_valid_83_char(char: str) -> bool:
     # Valid characters: A-Z, 0-9, and special chars
     # Windows allows: ! # $ % & ' ( ) - @ ^ _ ` { } ~
     # Windows does NOT allow: space + , . ; = [ ]
-    if char.isalnum():
+    if char.isalnum() and char.isascii():
         return True
     valid_special = "!#$%&'()-@^_`{}~"
     return char in valid_special
