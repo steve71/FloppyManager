@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
     QDialog, QTabWidget
 )
 from PyQt6.QtCore import Qt, QSettings, QTimer
-from PyQt6.QtGui import QIcon, QAction, QKeySequence
+from PyQt6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, QColor
 
 # Import the FAT12 handler
 from fat12_handler import FAT12Image
@@ -58,6 +58,7 @@ class FloppyManagerWindow(QMainWindow):
         self.confirm_delete = self.settings.value('confirm_delete', True, type=bool)
         self.confirm_replace = self.settings.value('confirm_replace', True, type=bool)
         self.use_numeric_tail = self.settings.value('use_numeric_tail', False, type=bool)
+        self.theme_mode = self.settings.value('theme_mode', 'light', type=str)
 
         # Restore window geometry if available
         geometry = self.settings.value('window_geometry')
@@ -68,6 +69,9 @@ class FloppyManagerWindow(QMainWindow):
         self.image = None
 
         self.setup_ui()
+        
+        # Apply theme after UI is set up
+        self.apply_theme(self.theme_mode)
 
         # Load image if provided or restore last image
         if image_path:
@@ -274,6 +278,32 @@ class FloppyManagerWindow(QMainWindow):
         self.use_numeric_tail_action.triggered.connect(self.toggle_numeric_tail)
         settings_menu.addAction(self.use_numeric_tail_action)
 
+        settings_menu.addSeparator()
+
+        # Theme submenu
+        theme_menu = settings_menu.addMenu("Theme")
+        
+        self.theme_group = QActionGroup(self)
+        self.theme_group.setExclusive(True)
+        
+        self.theme_light_action = QAction("Light", self)
+        self.theme_light_action.setCheckable(True)
+        self.theme_light_action.setActionGroup(self.theme_group)
+        self.theme_light_action.triggered.connect(lambda: self.change_theme('light'))
+        theme_menu.addAction(self.theme_light_action)
+        
+        self.theme_dark_action = QAction("Dark", self)
+        self.theme_dark_action.setCheckable(True)
+        self.theme_dark_action.setActionGroup(self.theme_group)
+        self.theme_dark_action.triggered.connect(lambda: self.change_theme('dark'))
+        theme_menu.addAction(self.theme_dark_action)
+        
+        # Set initial theme selection
+        if self.theme_mode == 'dark':
+            self.theme_dark_action.setChecked(True)
+        else:
+            self.theme_light_action.setChecked(True)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -303,6 +333,55 @@ class FloppyManagerWindow(QMainWindow):
             mode_desc = "Simple truncation mode enabled (like Linux nonumtail)"
         
         self.status_bar.showMessage(f"8.3 name generation: {mode_desc}")
+
+    def change_theme(self, theme_mode):
+        """Change the application theme"""
+        self.theme_mode = theme_mode
+        self.settings.setValue('theme_mode', theme_mode)
+        self.apply_theme(theme_mode)
+    
+    def apply_theme(self, theme_mode):
+        """Apply the specified theme to the application"""
+        app = QApplication.instance()
+        
+        if theme_mode == 'dark':
+            # Dark theme
+            app.setStyleSheet("")
+            palette = QPalette()
+            palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+            palette.setColor(QPalette.ColorRole.WindowText, QColor(255, 255, 255))
+            palette.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))
+            palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
+            palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(25, 25, 25))
+            palette.setColor(QPalette.ColorRole.ToolTipText, QColor(255, 255, 255))
+            palette.setColor(QPalette.ColorRole.Text, QColor(255, 255, 255))
+            palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
+            palette.setColor(QPalette.ColorRole.ButtonText, QColor(255, 255, 255))
+            palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 0, 0))
+            palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
+            palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
+            palette.setColor(QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
+            palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(127, 127, 127))
+            app.setPalette(palette)
+            
+        else:  # light (default)
+            # Light theme
+            app.setStyleSheet("")
+            palette = QPalette()
+            palette.setColor(QPalette.ColorRole.Window, QColor(240, 240, 240))
+            palette.setColor(QPalette.ColorRole.WindowText, QColor(0, 0, 0))
+            palette.setColor(QPalette.ColorRole.Base, QColor(255, 255, 255))
+            palette.setColor(QPalette.ColorRole.AlternateBase, QColor(245, 245, 245))
+            palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(255, 255, 220))
+            palette.setColor(QPalette.ColorRole.ToolTipText, QColor(0, 0, 0))
+            palette.setColor(QPalette.ColorRole.Text, QColor(0, 0, 0))
+            palette.setColor(QPalette.ColorRole.Button, QColor(240, 240, 240))
+            palette.setColor(QPalette.ColorRole.ButtonText, QColor(0, 0, 0))
+            palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 0, 0))
+            palette.setColor(QPalette.ColorRole.Link, QColor(0, 0, 255))
+            palette.setColor(QPalette.ColorRole.Highlight, QColor(0, 120, 215))
+            palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+            app.setPalette(palette)
 
     def table_key_press(self, event):
         """Handle keyboard events in the table"""

@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QScrollArea, QSizePolicy, QSpinBox, QFrame, QApplication
 )
 from PyQt6.QtCore import Qt, QSize, QTimer
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QPalette
 import struct
 
 # Import the FAT12 handler
@@ -413,36 +413,18 @@ class FATViewer(QDialog):
             f"<b>Total Clusters:</b> {self.total_clusters} | "
             f"<b>Number of FATs:</b> {self.image.num_fats}"
         )
-        info_label = QLabel(info_text)
-        info_label.setStyleSheet("QLabel { font-weight: bold; padding: 8px; background-color: #f0f0f0; }")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
+        self.info_label = QLabel(info_text)
+        self.info_label.setWordWrap(True)
+        layout.addWidget(self.info_label)
         
         # Legend
-        legend_frame = QFrame()
-        legend_frame.setFrameStyle(QFrame.Shape.StyledPanel)
-        legend_layout = QHBoxLayout(legend_frame)
-        legend_layout.addWidget(QLabel("<b>Legend:</b>"))
+        self.legend_frame = QFrame()
+        self.legend_frame.setFrameStyle(QFrame.Shape.StyledPanel)
         
-        # Create legend items
-        legend_items = [
-            ("Free (0x000)", QColor(240, 240, 240)),
-            ("Reserved (0x001)", QColor(200, 200, 255)),
-            ("Used (0x002-0xFF7)", QColor(144, 238, 144)),
-            ("Bad Cluster (0xFF7)", QColor(255, 200, 200)),
-            ("End of Chain (0xFF8-0xFFF)", QColor(255, 215, 0)),
-            ("Selected Chain", QColor(100, 149, 237))
-        ]
+        # Create initial legend layout
+        self.create_legend_layout()
         
-        for text, color in legend_items:
-            color_box = QLabel()
-            color_box.setFixedSize(20, 20)
-            color_box.setStyleSheet(f"background-color: {color.name()}; border: 1px solid #666;")
-            legend_layout.addWidget(color_box)
-            legend_layout.addWidget(QLabel(text))
-        
-        legend_layout.addStretch()
-        layout.addWidget(legend_frame)
+        layout.addWidget(self.legend_frame)
         
         # Controls
         controls_layout = QHBoxLayout()
@@ -554,30 +536,121 @@ class FATViewer(QDialog):
         
         self.update_cluster_colors()
     
+    def create_legend_layout(self):
+        """Create or recreate the legend layout with current theme colors"""
+        # Remove old layout if it exists
+        old_layout = self.legend_frame.layout()
+        if old_layout:
+            # Delete all widgets in the old layout
+            while old_layout.count():
+                item = old_layout.takeAt(0)
+                widget = item.widget()
+                if widget:
+                    widget.setParent(None)
+                    widget.deleteLater()
+            # Delete the old layout
+            QWidget().setLayout(old_layout)
+        
+        # Create new layout
+        self.legend_layout = QHBoxLayout(self.legend_frame)
+        
+        # Add Legend label
+        self.legend_layout.addWidget(QLabel("<b>Legend:</b>"))
+        
+        # Check if we're in dark mode
+        app = QApplication.instance()
+        palette = app.palette()
+        is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+        
+        # Create legend items with theme-appropriate colors
+        if is_dark:
+            legend_items = [
+                ("Free (0x000)", QColor(45, 45, 45)),
+                ("Reserved (0x001)", QColor(60, 60, 120)),
+                ("Used (0x002-0xFF7)", QColor(60, 120, 60)),
+                ("Bad Cluster (0xFF7)", QColor(120, 60, 60)),
+                ("End of Chain (0xFF8-0xFFF)", QColor(180, 140, 0)),
+                ("Selected Chain", QColor(70, 130, 180))
+            ]
+        else:
+            legend_items = [
+                ("Free (0x000)", QColor(240, 240, 240)),
+                ("Reserved (0x001)", QColor(200, 200, 255)),
+                ("Used (0x002-0xFF7)", QColor(144, 238, 144)),
+                ("Bad Cluster (0xFF7)", QColor(255, 200, 200)),
+                ("End of Chain (0xFF8-0xFFF)", QColor(255, 215, 0)),
+                ("Selected Chain", QColor(100, 149, 237))
+            ]
+        
+        for text, color in legend_items:
+            color_box = QLabel()
+            color_box.setFixedSize(20, 20)
+            color_box.setStyleSheet(f"background-color: {color.name()}; border: 1px solid #666;")
+            self.legend_layout.addWidget(color_box)
+            self.legend_layout.addWidget(QLabel(text))
+        
+        self.legend_layout.addStretch()
+    
     def update_cluster_colors(self):
         """Update colors of all cluster widgets based on selection"""
+        # Check if we're in dark mode
+        app = QApplication.instance()
+        palette = app.palette()
+        is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+        
         for cluster_num, cell in self.cluster_widgets.items():
             value = self.image.get_fat_entry(self.fat_data, cluster_num)
             
             # Determine if this cluster is in the selected chain
             is_selected = cluster_num in self.selected_chain
             
-            # Get base color
+            # Get base color - adjust for dark mode
             if is_selected:
-                color = QColor(100, 149, 237)  # Cornflower blue for selection
+                if is_dark:
+                    color = QColor(70, 130, 180)  # Steel blue for dark mode
+                    text_color = "white"
+                else:
+                    color = QColor(100, 149, 237)  # Cornflower blue for light mode
+                    text_color = "white"
             elif value == 0x000:
-                color = QColor(240, 240, 240)
+                if is_dark:
+                    color = QColor(45, 45, 45)  # Dark gray for dark mode
+                    text_color = "#888"
+                else:
+                    color = QColor(240, 240, 240)  # Light gray for light mode
+                    text_color = "#666"
             elif value == 0x001:
-                color = QColor(200, 200, 255)
+                if is_dark:
+                    color = QColor(60, 60, 120)  # Darker blue for dark mode
+                    text_color = "white"
+                else:
+                    color = QColor(200, 200, 255)  # Light blue for light mode
+                    text_color = "black"
             elif value == 0xFF7:
-                color = QColor(255, 200, 200)
+                if is_dark:
+                    color = QColor(120, 60, 60)  # Darker red for dark mode
+                    text_color = "white"
+                else:
+                    color = QColor(255, 200, 200)  # Light red for light mode
+                    text_color = "black"
             elif value >= 0xFF8:
-                color = QColor(255, 215, 0)
+                if is_dark:
+                    color = QColor(180, 140, 0)  # Darker gold for dark mode
+                    text_color = "white"
+                else:
+                    color = QColor(255, 215, 0)  # Gold for light mode
+                    text_color = "black"
             else:
-                color = QColor(144, 238, 144)
+                if is_dark:
+                    color = QColor(60, 120, 60)  # Darker green for dark mode
+                    text_color = "white"
+                else:
+                    color = QColor(144, 238, 144)  # Light green for light mode
+                    text_color = "black"
             
             cell.setStyleSheet(
                 f"background-color: {color.name()}; "
+                f"color: {text_color}; "
                 f"border: 1px solid #666; "
                 f"font-size: 10px; "
                 f"font-weight: bold;"
@@ -586,6 +659,9 @@ class FATViewer(QDialog):
     def rebuild_grid(self):
         """Rebuild the FAT grid with current settings"""
         clusters_per_row = self.clusters_per_row_spinbox.value()
+        
+        # Update legend colors for current theme
+        self.create_legend_layout()
         
         # Clear old layout
         old_layout = self.grid_container.layout()
