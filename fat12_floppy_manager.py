@@ -88,7 +88,7 @@ class FloppyManagerWindow(QMainWindow):
     def setup_ui(self):
         """Create the user interface"""
         self.setWindowTitle("FAT12 Floppy Manager")
-        self.setGeometry(100, 100, 1000, 600)
+        self.setGeometry(400, 200, 620, 500)
 
         # Enable drag and drop
         self.setAcceptDrops(True)
