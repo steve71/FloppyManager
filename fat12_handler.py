@@ -563,3 +563,22 @@ class FAT12Image:
             for i in range(num_fats):
                 f.seek(fat_start + (i * fat_size))
                 f.write(fat_data)
+    
+    def format_disk(self):
+        """Format the disk - erase all files and reset FAT to clean state"""
+        with open(self.image_path, 'r+b') as f:
+            # Clear root directory
+            f.seek(self.root_start)
+            f.write(b'\x00' * self.root_size)
+            
+            # Reset FAT - keep media descriptor, clear everything else
+            fat_data = bytearray(self.sectors_per_fat * self.bytes_per_sector)
+            fat_data[0] = self.media_descriptor
+            fat_data[1] = 0xFF
+            fat_data[2] = 0xFF
+            
+            # Write to all FAT copies
+            for i in range(self.num_fats):
+                offset = self.fat_start + (i * self.sectors_per_fat * self.bytes_per_sector)
+                f.seek(offset)
+                f.write(fat_data)

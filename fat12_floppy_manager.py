@@ -231,6 +231,13 @@ class FloppyManagerWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        format_action = QAction("&Format Disk...", self)
+        format_action.setToolTip("Erase all files and reset the disk to empty state")
+        format_action.triggered.connect(self.format_disk)
+        file_menu.addAction(format_action)
+
+        file_menu.addSeparator()
+
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
@@ -760,6 +767,43 @@ class FloppyManagerWindow(QMainWindow):
             self.status_bar.showMessage(f"Saved as: {Path(filename).name}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save image: {e}")
+
+    def format_disk(self):
+        """Format the disk - erase all files and reset to empty state"""
+        if not self.image:
+            QMessageBox.information(self, "No Image Loaded", "No image loaded to format.")
+            return
+        
+        # Show warning dialog
+        response = QMessageBox.warning(
+            self,
+            "Format Disk",
+            "⚠️ WARNING: This will permanently erase ALL files on the disk!\n\n"
+            f"Disk: {Path(self.image_path).name}\n\n"
+            "Are you sure you want to format this disk?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No  # Default to No for safety
+        )
+        
+        if response == QMessageBox.StandardButton.No:
+            return
+        
+        try:
+            # Format the disk
+            self.image.format_disk()
+            
+            # Refresh the file list to show empty disk
+            self.refresh_file_list()
+            
+            QMessageBox.information(
+                self,
+                "Format Complete",
+                "Disk has been formatted successfully.\nAll files have been erased."
+            )
+            
+            self.status_bar.showMessage("Disk formatted - all files erased")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to format disk: {e}")
 
     def open_image(self):
         """Open a different floppy image"""
