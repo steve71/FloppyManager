@@ -463,17 +463,6 @@ class FloppyManagerWindow(QMainWindow):
         """Handle keyboard events in the table"""
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.delete_selected()
-        elif event.key() == Qt.Key.Key_Escape:
-            # Cancel editing if in progress
-            if self.currently_editing and self.original_name_before_edit:
-                current_item = self.table.currentItem()
-                if current_item and current_item.column() == 0:
-                    current_item.setText(self.original_name_before_edit)
-                    self.currently_editing = False
-                    self.original_name_before_edit = None
-                    self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-            # Call the original keyPressEvent
-            QTableWidget.keyPressEvent(self.table, event)
         else:
             # Call the original keyPressEvent
             QTableWidget.keyPressEvent(self.table, event)
@@ -889,7 +878,6 @@ class FloppyManagerWindow(QMainWindow):
     def show_about(self):
         """Show about dialog"""
         about_text = """<h2>FAT12 Floppy Manager</h2>
-        <p><b>Version 2.1</b></p>
 
         <p>A modern tool for managing files on FAT12 floppy disk images with VFAT long filename support.</p>
 
