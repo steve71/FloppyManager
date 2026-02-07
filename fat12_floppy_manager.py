@@ -391,6 +391,7 @@ class FloppyManagerWindow(QMainWindow):
         file_menu.addSeparator()
 
         format_action = QAction("&Format Disk...", self)
+        format_action.setShortcut("Ctrl+Shift+F")
         format_action.setToolTip("Erase all files and reset the disk to empty state")
         format_action.triggered.connect(self.format_disk)
         file_menu.addAction(format_action)
@@ -1251,10 +1252,14 @@ class FloppyManagerWindow(QMainWindow):
         <li>Displays both long filenames and 8.3 short names</li>
         <li>Save copies of floppy images</li>
         <li>Drag and drop files to add them</li>
-        <li>Delete files (press Del key)</li>
-        <li>Extract files with original long names</li>
-        <li>View boot sector information</li>
-        <li>View complete root directory information with timestamps</li>
+        <li>Rename files (Windows-style inline editing)</li>
+        <li>Delete files (selected or all)</li>
+        <li>Extract files (selected, all, or to ZIP)</li>
+        <li>Format disk</li>
+        <li>Boot Sector Viewer (BPB & Geometry)</li>
+        <li>Root Directory Viewer (Raw entries & LFNs)</li>
+        <li>FAT Viewer (Cluster map & chains)</li>
+        <li>Modern UI with Toolbar and Light/Dark themes</li>
         <li>Remembers last opened image and settings</li>
         </ul>
 
@@ -1263,6 +1268,7 @@ class FloppyManagerWindow(QMainWindow):
         <li>Ctrl+N - Create new image</li>
         <li>Ctrl+O - Open image</li>
         <li>Ctrl+Shift+S - Save image as</li>
+        <li>Ctrl+Shift+F - Format disk</li>
         <li>Del/Backspace - Delete selected files</li>
         <li>Double-click - Extract file</li>
         </ul>
