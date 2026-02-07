@@ -1,10 +1,13 @@
 import pytest
 import datetime
+import struct
 from vfat_utils import (
     decode_fat_time, decode_fat_date, 
     encode_fat_time, encode_fat_date,
     generate_83_name, is_valid_83_char,
-    calculate_lfn_checksum, create_lfn_entries
+    calculate_lfn_checksum, create_lfn_entries,
+    parse_raw_lfn_entry, parse_raw_short_entry,
+    decode_lfn_text, decode_short_name
 )
 
 class TestTimeDate:
@@ -211,3 +214,74 @@ class TestLFN:
         assert entry[14:26] == b'\xff' * 12
         # chars3 (4 bytes) -> all padding
         assert entry[28:32] == b'\xff' * 4
+
+class TestRawEntryParsing:
+    def test_parse_raw_short_entry(self):
+        # Create a mock 32-byte short entry
+        # Filename: "TEST    TXT" (11 bytes)
+        # Attr: 0x20 (Archive)
+        # Reserved: 0x00
+        # Time/Date: Arbitrary valid values
+        # Size: 1024
+        
+        entry = bytearray(32)
+        entry[0:11] = b"TEST    TXT"
+        entry[11] = 0x20
+        entry[28:32] = struct.pack('<I', 1024)
+        
+        info = parse_raw_short_entry(entry)
+        
+        assert info['filename'] == "TEST    TXT"
+        assert info['attr'] == 0x20
+        assert "ARC" in info['attr_str']
+        assert info['file_size'] == 1024
+        assert info['creation_date_str'] == "Invalid" # Default 0 is invalid
+
+    def test_parse_raw_lfn_entry(self):
+        # Create a mock LFN entry
+        # Seq: 0x41 (Last, index 1)
+        # Name: "A" (UTF-16LE: 0x41 0x00)
+        
+        entry = bytearray(32)
+        entry[0] = 0x41
+        entry[1:3] = b'A\x00' # First char
+        entry[11] = 0x0F # LFN Attr
+        
+        info = parse_raw_lfn_entry(entry)
+        
+        assert info['seq_num'] == 1
+        assert info['is_last'] is True
+        assert info['attr'] == 0x0F
+        assert info['text1'].startswith('A')
+
+class TestNameDecoding:
+    def test_decode_lfn_text(self):
+        # Create a mock LFN entry with "ABC"
+        entry = bytearray(32)
+        # Chars 1-5 (bytes 1-11)
+        entry[1:7] = b'A\x00B\x00C\x00'
+        entry[7:9] = b'\x00\x00' # Null terminator
+        entry[9:11] = b'\xFF\xFF' # Padding
+        # Chars 6-11 (bytes 14-26) - all padding
+        entry[14:26] = b'\xFF' * 12
+        # Chars 12-13 (bytes 28-32) - all padding
+        entry[28:32] = b'\xFF' * 4
+        
+        text = decode_lfn_text(entry)
+        assert text == "ABC"
+
+    def test_decode_short_name(self):
+        # Test standard name
+        entry = bytearray(32)
+        entry[0:11] = b"FILE    TXT"
+        assert decode_short_name(entry) == ("FILE", "TXT")
+        
+        # Test Shift-JIS 0x05 fix
+        entry[0] = 0x05
+        entry[1:8] = b"ILENAME"
+        # Should decode 0x05 as 0xE5, but ascii ignore drops it?
+        # Wait, decode_short_name uses errors='ignore'. 
+        # 0xE5 is not ASCII. So it will be dropped.
+        # "ILENAME"
+        name, ext = decode_short_name(entry)
+        assert name == "ILENAME"

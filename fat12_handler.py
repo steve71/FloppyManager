@@ -32,7 +32,8 @@ from typing import List
 from vfat_utils import (decode_fat_time, decode_fat_date, 
                         encode_fat_time, encode_fat_date, 
                         generate_83_name, calculate_lfn_checksum, 
-                        create_lfn_entries)
+                        create_lfn_entries, decode_lfn_text,
+                        decode_short_name)
 class FAT12Image:
     """Handler for FAT12 floppy disk images"""
     
@@ -155,22 +156,8 @@ class FAT12Image:
                     seq = entry_data[0]
                     checksum = entry_data[13]
                     
-                    # Extract characters
-                    chars = bytearray()
-                    chars.extend(entry_data[1:11])   # First 5 chars (10 bytes)
-                    chars.extend(entry_data[14:26])  # Next 6 chars (12 bytes)
-                    chars.extend(entry_data[28:32])  # Last 2 chars (4 bytes)
-                    
-                    try:
-                        text = chars.decode('utf-16le')
-                        # Stop at null terminator or 0xFF padding
-                        null_pos = text.find('\x00')
-                        if null_pos != -1:
-                            text = text[:null_pos]
-                        text = text.replace('\uffff', '')  # Remove 0xFFFF padding
-                        
-                        # Check if this is the last LFN entry (has 0x40 bit set)
-                        # LFN entries are stored in reverse order in the directory
+                    text = decode_lfn_text(entry_data)
+                    if text is not None:
                         if seq & 0x40:
                             # This is the last entry, start fresh
                             lfn_parts = [text]
@@ -179,7 +166,7 @@ class FAT12Image:
                             # This is a continuation, append to the end
                             # (we're reading backwards through the entries)
                             lfn_parts.append(text)
-                    except:
+                    else:
                         lfn_parts = []
                         lfn_checksum = None
                     
@@ -192,14 +179,7 @@ class FAT12Image:
                     continue
                 
                 # This is a regular 8.3 entry
-                name = entry_data[0:8].decode('ascii', errors='ignore').strip()
-                ext = entry_data[8:11].decode('ascii', errors='ignore').strip()
-
-                # Handle the 0x05 Shift-JIS lead byte
-                raw_name = list(entry_data[0:8])
-                if raw_name[0] == 0x05:
-                    raw_name[0] = 0xE5
-                name = bytes(raw_name).decode('ascii', errors='ignore').strip()
+                name, ext = decode_short_name(entry_data)
                 
                 if name and name[0] not in ('.', '\x00'):
                     short_name_83 = f"{name}.{ext}" if ext else name

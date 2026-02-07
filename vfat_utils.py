@@ -1,6 +1,7 @@
+import struct
 import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Tuple, Optional
 
 def decode_fat_time(time_value: int) -> str:
     """Decode FAT time format to HH:MM:SS string
@@ -253,3 +254,114 @@ def create_lfn_entries(long_name: str, short_name: bytes) -> List[bytes]:
 
     # Return in reverse order (LFN entries are written before the short entry)
     return list(reversed(entries))
+
+
+def parse_raw_lfn_entry(entry_data: bytes) -> dict:
+    """Parse a raw 32-byte LFN entry into a dictionary of fields"""
+    seq = entry_data[0]
+    is_last = (seq & 0x40) != 0
+    seq_num = seq & 0x1F
+    checksum = entry_data[13]
+    lfn_type = entry_data[12]
+    first_cluster = struct.unpack('<H', entry_data[26:28])[0]
+    attr = entry_data[11]
+    
+    chars1 = entry_data[1:11]
+    chars2 = entry_data[14:26]
+    chars3 = entry_data[28:32]
+    
+    try:
+        text1 = chars1.decode('utf-16le').replace('\x00', '∅').replace('\uffff', '█')
+        text2 = chars2.decode('utf-16le').replace('\x00', '∅').replace('\uffff', '█')
+        text3 = chars3.decode('utf-16le').replace('\x00', '∅').replace('\uffff', '█')
+    except:
+        text1 = '???'
+        text2 = '???'
+        text3 = '???'
+        
+    return {
+        'seq': seq,
+        'seq_num': seq_num,
+        'is_last': is_last,
+        'checksum': checksum,
+        'lfn_type': lfn_type,
+        'first_cluster': first_cluster,
+        'attr': attr,
+        'chars1_hex': ' '.join(f'{b:02X}' for b in chars1),
+        'chars2_hex': ' '.join(f'{b:02X}' for b in chars2),
+        'chars3_hex': ' '.join(f'{b:02X}' for b in chars3),
+        'text1': text1,
+        'text2': text2,
+        'text3': text3
+    }
+
+
+def parse_raw_short_entry(entry_data: bytes) -> dict:
+    """Parse a raw 32-byte short (8.3) entry into a dictionary of fields"""
+    filename = entry_data[0:11].decode('ascii', errors='replace')
+    attributes = entry_data[11]
+    reserved = entry_data[12]
+    creation_time_tenth = entry_data[13]
+    creation_time = struct.unpack('<H', entry_data[14:16])[0]
+    creation_date = struct.unpack('<H', entry_data[16:18])[0]
+    last_access_date = struct.unpack('<H', entry_data[18:20])[0]
+    first_cluster_high = struct.unpack('<H', entry_data[20:22])[0]
+    last_modified_time = struct.unpack('<H', entry_data[22:24])[0]
+    last_modified_date = struct.unpack('<H', entry_data[24:26])[0]
+    first_cluster_low = struct.unpack('<H', entry_data[26:28])[0]
+    file_size = struct.unpack('<I', entry_data[28:32])[0]
+    
+    # Decode attribute flags
+    attr_flags = []
+    if attributes & 0x01: attr_flags.append("RO")
+    if attributes & 0x02: attr_flags.append("HID")
+    if attributes & 0x04: attr_flags.append("SYS")
+    if attributes & 0x08: attr_flags.append("VOL")
+    if attributes & 0x10: attr_flags.append("DIR")
+    if attributes & 0x20: attr_flags.append("ARC")
+    attr_str = ",".join(attr_flags) if attr_flags else "-"
+    
+    return {
+        'filename': filename,
+        'attr': attributes,
+        'attr_str': attr_str,
+        'reserved': reserved,
+        'creation_time_tenth': creation_time_tenth,
+        'creation_time_str': decode_fat_time(creation_time),
+        'creation_date_str': decode_fat_date(creation_date),
+        'last_access_date_str': decode_fat_date(last_access_date),
+        'first_cluster_high': first_cluster_high,
+        'last_modified_time_str': decode_fat_time(last_modified_time),
+        'last_modified_date_str': decode_fat_date(last_modified_date),
+        'first_cluster_low': first_cluster_low,
+        'file_size': file_size
+    }
+
+
+def decode_lfn_text(entry_data: bytes) -> Optional[str]:
+    """Extract and decode the UTF-16LE text from a raw LFN entry"""
+    chars = bytearray()
+    chars.extend(entry_data[1:11])   # First 5 chars (10 bytes)
+    chars.extend(entry_data[14:26])  # Next 6 chars (12 bytes)
+    chars.extend(entry_data[28:32])  # Last 2 chars (4 bytes)
+    
+    try:
+        text = chars.decode('utf-16le')
+        # Stop at null terminator or 0xFF padding
+        null_pos = text.find('\x00')
+        if null_pos != -1:
+            text = text[:null_pos]
+        text = text.replace('\uffff', '')  # Remove 0xFFFF padding
+        return text
+    except:
+        return None
+
+
+def decode_short_name(entry_data: bytes) -> Tuple[str, str]:
+    """Decode 8.3 filename from entry data, handling 0x05 lead byte"""
+    raw_name = list(entry_data[0:8])
+    if raw_name[0] == 0x05:
+        raw_name[0] = 0xE5
+    name = bytes(raw_name).decode('ascii', errors='ignore').strip()
+    ext = entry_data[8:11].decode('ascii', errors='ignore').strip()
+    return name, ext

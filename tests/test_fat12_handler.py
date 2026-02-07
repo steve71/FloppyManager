@@ -2,7 +2,7 @@ import pytest
 import datetime
 import struct
 from fat12_handler import FAT12Image
-from vfat_utils import decode_fat_date, decode_fat_time
+from vfat_utils import decode_fat_date, decode_fat_time, calculate_lfn_checksum
 
 @pytest.fixture
 def handler():
@@ -677,3 +677,31 @@ class TestClusterAnalysis:
         
         chain = handler.get_cluster_chain(5)
         assert chain == [3, 5]
+
+    def test_lfn_invalid_utf16(self, tmp_path):
+        img_path = tmp_path / "test_bad_lfn.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # 1. Manually write a malformed LFN entry at Index 0
+        # LFN entry with invalid UTF-16 sequence
+        lfn_entry = bytearray(32)
+        lfn_entry[0] = 0x41 # Last entry, seq 1
+        lfn_entry[11] = 0x0F # LFN attr
+        lfn_entry[13] = calculate_lfn_checksum(b"BADLFN  TXT")
+        # Invalid UTF-16LE: High surrogate (0xD800) followed by space (0x0020)
+        # This ensures strict decoding fails
+        lfn_entry[1:5] = b'\x00\xD8\x20\x00' 
+        
+        with open(str(img_path), 'r+b') as f:
+            f.seek(handler.root_start)
+            f.write(lfn_entry)
+            
+        # 2. Write the file (will skip Index 0 because it's occupied, and write to Index 1)
+        handler.write_file_to_image("BADLFN.TXT", b"data")
+            
+        # Read directory
+        entries = handler.read_root_directory()
+        
+        # Should ignore the LFN and show short name
+        assert entries[0]['name'] == "BADLFN.TXT"
