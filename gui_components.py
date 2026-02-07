@@ -67,7 +67,7 @@ class BootSectorViewer(QDialog):
         vol_geom_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         vol_geom_table.setAlternatingRowColors(True)
         
-        total_bytes = self.image.total_sectors * self.image.bytes_per_sector
+        total_bytes = self.image.get_total_capacity()
         
         vol_geom_data = [
             ('Detected File System Type', self.image.fat_type),

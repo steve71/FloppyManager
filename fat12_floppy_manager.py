@@ -529,9 +529,7 @@ class FloppyManagerWindow(QMainWindow):
                     self.table.setItem(row, 4, index_item)
 
             # Update info
-            free_clusters = len(self.image.find_free_clusters())
-            free_space = free_clusters * self.image.bytes_per_cluster
-            self.info_label.setText(f"{len(entries)} files | {free_space:,} bytes free")
+            self.info_label.setText(f"{len(entries)} files | {self.image.get_free_space():,} bytes free")
             self.status_bar.showMessage(f"Loaded {len(entries)} files")
 
         except Exception as e:
@@ -629,15 +627,7 @@ class FloppyManagerWindow(QMainWindow):
                 short_display = short_display.rstrip('.')
 
                 # Check if file already exists
-                existing_entries = self.image.read_root_directory()
-                collision_entry = None
-                
-                # Check both long name and short name
-                for e in existing_entries:
-                    e_short_83 = e['short_name'].replace('.', '').ljust(11).upper()
-                    if e_short_83 == short_name_83:
-                        collision_entry = e
-                        break
+                collision_entry = self.image.find_entry_by_83_name(short_name_83)
 
                 if collision_entry:
                     if self.confirm_replace:

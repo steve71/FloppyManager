@@ -705,3 +705,70 @@ class TestClusterAnalysis:
         
         # Should ignore the LFN and show short name
         assert entries[0]['name'] == "BADLFN.TXT"
+
+class TestHelperMethods:
+    def test_get_total_capacity(self, tmp_path):
+        img_path = tmp_path / "test_cap.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        # 2880 sectors * 512 bytes = 1,474,560 bytes
+        assert handler.get_total_capacity() == 1474560
+
+    def test_get_free_space(self, tmp_path):
+        img_path = tmp_path / "test_free.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Initial free space: 2847 clusters * 512 bytes
+        initial_free = 2847 * 512
+        assert handler.get_free_space() == initial_free
+        
+        # Write 1024 bytes (2 clusters)
+        handler.write_file_to_image("test.txt", b"A" * 1024)
+        
+        # Should decrease by 2 clusters
+        assert handler.get_free_space() == initial_free - 1024
+
+    def test_find_entry_by_83_name(self, tmp_path):
+        img_path = tmp_path / "test_find.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        handler.write_file_to_image("FILE.TXT", b"content")
+        handler.write_file_to_image("NOEXT", b"content")
+        
+        # Correct format search
+        entry = handler.find_entry_by_83_name("FILE    TXT")
+        assert entry is not None
+        assert entry['name'] == "FILE.TXT"
+        
+        # Lowercase input should work (method upper()s it)
+        entry = handler.find_entry_by_83_name("file    txt")
+        assert entry is not None
+        assert entry['name'] == "FILE.TXT"
+        
+        # Search for file without extension
+        entry = handler.find_entry_by_83_name("NOEXT      ")
+        assert entry is not None
+        assert entry['name'] == "NOEXT"
+        
+        # Wrong format (with dot) should fail to find
+        entry = handler.find_entry_by_83_name("FILE.TXT")
+        assert entry is None
+        
+        # Non-existent file
+        entry = handler.find_entry_by_83_name("NONEXIST   ")
+        assert entry is None
+
+    def test_get_existing_83_names(self, tmp_path):
+        img_path = tmp_path / "test_existing.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        handler.write_file_to_image("A.TXT", b"")
+        handler.write_file_to_image("LONGFILENAME.TXT", b"", use_numeric_tail=True) # LONGFILENAME.TXT -> LONGFI~1.TXT -> LONGFI~1TXT
+        
+        names = handler.get_existing_83_names()
+        assert "A       TXT" in names
+        assert "LONGFI~1TXT" in names
+        assert len(names) == 2

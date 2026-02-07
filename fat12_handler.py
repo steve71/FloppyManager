@@ -27,9 +27,9 @@ Core functionality for reading/writing FAT12 floppy disk images with VFAT long f
 
 import struct
 import datetime
-from typing import List
+from typing import List, Optional
 
-from vfat_utils import (decode_fat_time, decode_fat_date, 
+from vfat_utils import (decode_fat_time, decode_fat_date,
                         encode_fat_time, encode_fat_date, 
                         generate_83_name, calculate_lfn_checksum, 
                         create_lfn_entries, decode_lfn_text,
@@ -89,6 +89,31 @@ class FAT12Image:
         else:
             self.fat_type = 'FAT32'
         
+    def get_total_capacity(self) -> int:
+        """Get total disk capacity in bytes"""
+        return self.total_sectors * self.bytes_per_sector
+
+    def get_free_space(self) -> int:
+        """Get free space in bytes"""
+        return len(self.find_free_clusters()) * self.bytes_per_cluster
+
+    def find_entry_by_83_name(self, target_83_name: str) -> Optional[dict]:
+        """Find a directory entry by its 11-character 8.3 name (no dot)"""
+        # target_83_name should be 11 chars, space padded, uppercase
+        target = target_83_name.upper().ljust(11)[:11]
+        
+        entries = self.read_root_directory()
+        for entry in entries:
+            # Reconstruct 11-byte name from the dotted short_name
+            parts = entry['short_name'].split('.')
+            name = parts[0].upper().ljust(8)
+            ext = parts[1].upper().ljust(3) if len(parts) > 1 else "   "
+            raw_name = (name + ext)[:11]
+            
+            if raw_name == target:
+                return entry
+        return None
+
     def read_fat(self) -> bytearray:
         """Read the FAT table"""
         with open(self.image_path, 'rb') as f:
