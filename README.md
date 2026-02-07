@@ -4,7 +4,7 @@
 
 A modern GUI tool designed for managing FAT12 formatted floppy disk images (.img) used in Yamaha keyboards like the **DGX-500**, **PSR series**, and **Clavinova** or other vintage keyboards. Currently verified to work with Yamaha DGX-500.
 
-<img width="717" height="656" alt="image" src="https://github.com/user-attachments/assets/036d19df-7b20-4638-97e5-b4d71a743910" />
+<img width="747" height="563" alt="image" src="https://github.com/user-attachments/assets/0cf5c649-a6c9-44ee-84a0-a316d86565ad" />
 
 ---
 
@@ -57,6 +57,8 @@ dist\FAT12 Floppy Manager.exe
 
 ### General
 - **FAT12 Support** - Standard FAT12 format verified to work with Yamaha DGX-500
+- **Modern UI** - Native OS styling with Toolbar and Light/Dark themes
+- **Persistent Settings** - Remembers last opened image and settings between sessions
 
 ### File Management
 - **Create new blank floppy images** - standard 1.44MB FAT12 floppy images
@@ -65,24 +67,30 @@ dist\FAT12 Floppy Manager.exe
 - **VFAT Filename Displayed in Table** - Displays both long filenames and 8.3 short names as well as size and type
 - **Save floppy images** - save copies of floppy images
 - **Add files** - Drag any files or add file(s) with "Add Files" button
-- **Delete files** - Press Delete, Backspace key or use "Delete Selected" button
-- **Extract files** - Double-click or extract with "Extract Selected" button
+- **Rename files** - Windows-style inline editing (F2)
+- **Delete files** - Delete selected files or all files (Del/Backspace key)
+- **Extract files** - Extract selected files, all files, or export all to a ZIP archive
+- **Format disk** - Erase all files and reset the disk to empty state
 - **Sort columns** - Click any column header
 - **Disk space** - Real-time monitoring
+
+### Viewers & Tools
 - **Boot Sector info** - View boot sector information
 - **Root Directory info** - View complete root directory information with timestamps
+- **FAT Viewer** - View File Allocation Table as a grid with cluster chains
 
 ### Settings
 - **Confirmations** - Toggle on/off for delete/replace
 - **Numeric Tails** - Toggle on/off for numeric tails (Windows-style vs. Linux truncation option)
-- **Persistent** - Settings saved between sessions
-- **Modern UI** - Native OS styling with PyQt
 
 ### Keyboard Shortcuts
 - **Delete/Backspace** - Delete selected files
 - **Double-click** - Extract file
 - **Ctrl+A** - Select all
+- **Ctrl+N** - Create new image
 - **Ctrl+O** - Open different image
+- **Ctrl+Shift+S** - Save image as
+- **Ctrl+Shift+F** - Format disk
 
 ---
 
