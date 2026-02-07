@@ -47,6 +47,33 @@ from PyQt6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, QC
 from fat12_handler import FAT12Image
 from gui_components import BootSectorViewer, RootDirectoryViewer, FATViewer
 
+from PyQt6.QtWidgets import QStyledItemDelegate, QLineEdit
+
+class RenameDelegate(QStyledItemDelegate):
+    """Custom delegate that selects only filename (not extension) when editing starts"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.should_customize_selection = False
+    
+    def createEditor(self, parent, option, index):
+        """Create editor and customize selection if requested"""
+        editor = super().createEditor(parent, option, index)
+        if isinstance(editor, QLineEdit) and self.should_customize_selection:
+            # Only customize if we explicitly requested it
+            QTimer.singleShot(0, lambda: self.customize_selection(editor, index))
+            self.should_customize_selection = False  # Reset flag
+        return editor
+    
+    def customize_selection(self, editor, index):
+        """Customize the text selection to exclude extension"""
+        if editor and editor.isVisible():
+            text = index.data()
+            if text:
+                full_name, start, end = split_filename_for_editing(text)
+                editor.setFocus()
+                editor.setSelection(start, end - start)
+
 class FloppyManagerWindow(QMainWindow):
     """Main window for the floppy manager"""
 
@@ -66,6 +93,11 @@ class FloppyManagerWindow(QMainWindow):
 
         self.image_path = image_path
         self.image = None
+        
+        # Track clicks for rename-on-slow-double-click
+        self._last_click_time = 0
+        self._last_click_row = -1
+        self._last_click_col = -1
         
         # Apply theme after UI is set up
         self.apply_theme(self.theme_mode)
@@ -162,11 +194,19 @@ class FloppyManagerWindow(QMainWindow):
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)
+        # Disable all automatic edit triggers - we'll handle this manually
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
         # Track editing state
         self._editing_in_progress = False
         self.table.itemChanged.connect(self.on_item_changed)
+        
+        # Set custom delegate for filename column to handle selection
+        self.rename_delegate = RenameDelegate(self.table)
+        self.table.setItemDelegateForColumn(0, self.rename_delegate)
+        
+        # Reset click tracking when selection changes
+        self.table.itemSelectionChanged.connect(self.on_selection_changed)
 
         # Set column widths
         header = self.table.horizontalHeader()
@@ -175,8 +215,9 @@ class FloppyManagerWindow(QMainWindow):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Size
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Type
 
-        # Double-click to extract
-        self.table.doubleClicked.connect(self.extract_selected)
+        # Handle clicks for rename and extract
+        self.table.clicked.connect(self.on_table_clicked)
+        self.table.doubleClicked.connect(self.on_table_double_clicked)
 
         # Context menu
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -957,10 +998,72 @@ class FloppyManagerWindow(QMainWindow):
 
 
 
+    def on_selection_changed(self):
+        """Reset click tracking when selection changes"""
+        # Don't reset if we're in the middle of editing
+        if not self._editing_in_progress:
+            self._last_click_time = 0
+            self._last_click_row = -1
+            self._last_click_col = -1
+    
+    def on_table_clicked(self, index):
+        """Handle single clicks on table - detect slow double-click for rename"""
+        import time
+        
+        if not self.image:
+            return
+        
+        current_time = time.time()
+        row = index.row()
+        col = index.column()
+        
+        # Only process clicks on the filename column
+        if col != 0:
+            return
+        
+        # Check if this is a slow double-click (click on already selected item)
+        # Windows uses ~500ms minimum between clicks for rename
+        time_since_last_click = current_time - self._last_click_time
+        
+        # Conditions for rename:
+        # 1. Same row as last click
+        # 2. Between 0.5 and 5 seconds since last click (slow double-click window)
+        # 3. Item is already selected (not a fresh selection)
+        if (row == self._last_click_row and 
+            col == self._last_click_col and
+            0.5 <= time_since_last_click <= 5.0):
+            
+            # This is a slow double-click - start rename
+            self.start_rename()
+            # Reset tracking to prevent immediate re-trigger
+            self._last_click_time = 0
+            self._last_click_row = -1
+            self._last_click_col = -1
+        else:
+            # Update tracking for next click
+            self._last_click_time = current_time
+            self._last_click_row = row
+            self._last_click_col = col
+    
+    def on_table_double_clicked(self, index):
+        """Handle double-clicks on table - extract file"""
+        # Reset click tracking to prevent rename after double-click
+        self._last_click_time = 0
+        self._last_click_row = -1
+        self._last_click_col = -1
+        
+        # Extract the file
+        self.extract_selected()
+
     def start_rename(self):
         """Start inline renaming of the selected file (Windows-style)"""
         if not self.image:
             return
+        
+        # Reset click tracking
+        self._last_click_time = 0
+        self._last_click_row = -1
+        self._last_click_col = -1
         
         # Get selected row
         selected_rows = set(item.row() for item in self.table.selectedItems())
@@ -973,35 +1076,19 @@ class FloppyManagerWindow(QMainWindow):
             return
         
         row = list(selected_rows)[0]
-        filename_item = self.table.item(row, 0)
         
-        if not filename_item:
-            return
+        # Make sure we're on the filename column
+        self.table.setCurrentCell(row, 0)
         
-        # Enable editing on the filename column
+        # Tell the delegate to customize selection
+        self.rename_delegate.should_customize_selection = True
+        
+        # Temporarily enable editing, start edit, then disable again
         self.table.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
+        self.table.edit(self.table.currentIndex())
         
-        # Enter edit mode
-        self.table.editItem(filename_item)
-        
-        # Get the line edit widget that was created and select filename without extension
-        QTimer.singleShot(0, lambda: self.select_filename_without_extension(filename_item))
-    
-    def select_filename_without_extension(self, item):
-        """Select only the filename part, excluding the extension (Windows behavior)"""
-        editor = self.table.cellWidget(item.row(), item.column())
-        if not editor:
-            # Try to get the item delegate's editor
-            from PyQt6.QtWidgets import QLineEdit
-            for child in self.table.children():
-                if isinstance(child, QLineEdit) and child.isVisible():
-                    editor = child
-                    break
-        
-        if editor:
-            filename = item.text()
-            full_name, start, end = split_filename_for_editing(filename)
-            editor.setSelection(start, end - start)
+        # Disable editing triggers after a moment (after editor is created)
+        QTimer.singleShot(100, lambda: self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers))
     
     def on_item_changed(self, item):
         """Handle item changes (when rename is completed)"""
@@ -1020,8 +1107,7 @@ class FloppyManagerWindow(QMainWindow):
     def process_rename(self, item):
         """Process the rename after Qt's editing lifecycle completes"""
         try:
-            # Disable editing again
-            self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            # Edit triggers are already NoEditTriggers - no need to set again
             
             new_name = item.text().strip()
             row = item.row()
@@ -1049,18 +1135,9 @@ class FloppyManagerWindow(QMainWindow):
             old_name = entry['name']
             
             # Check if name actually changed
-            if new_name == old_name:
-                self._editing_in_progress = False
-                return
-            
-            # Validate new name
-            if not new_name:
-                QMessageBox.warning(
-                    self,
-                    "Invalid Name",
-                    "Filename cannot be empty."
-                )
-                # Temporarily disconnect to avoid recursion
+            if new_name == old_name or not new_name:
+                # User cancelled or didn't change anything
+                # Silently restore original name
                 self.table.itemChanged.disconnect(self.on_item_changed)
                 item.setText(old_name)
                 self.table.itemChanged.connect(self.on_item_changed)
