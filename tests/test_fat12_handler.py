@@ -816,3 +816,60 @@ class TestHelperMethods:
         # Entries = (4608 * 8) / 12 = 3072
         # Result should be min(3072, 4084) = 3072
         assert handler.get_total_cluster_count() == 3072
+
+    def test_get_existing_83_names_filtering(self, tmp_path):
+        img_path = tmp_path / "test_filter.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # 1. Write a file and delete it (marks as 0xE5)
+        handler.write_file_to_image("DEL.TXT", b"")
+        entries = handler.read_root_directory()
+        handler.delete_file(entries[0])
+        
+        # 2. Manually write a file with 0x05 (Shift-JIS 0xE5) at index 1
+        with open(str(img_path), 'r+b') as f:
+            f.seek(handler.root_start + 32) # Index 1
+            entry = bytearray(32)
+            entry[0] = 0x05
+            entry[1:11] = b"EST    TXT" # 10 bytes to fit slice
+            f.write(entry)
+            
+        names = handler.get_existing_83_names()
+        
+        # Should NOT contain DEL.TXT (deleted files are skipped)
+        # Should contain the 0x05 file (decoded as "EST    TXT" due to replace errors)
+        assert "\uFFFDEST    TXT" in names
+        assert len(names) == 1
+
+    def test_find_entry_by_83_name_raw_match(self, tmp_path):
+        img_path = tmp_path / "test_find_raw.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        handler.write_file_to_image("FILE.TXT", b"")
+        
+        # Search using the raw 11-byte format
+        entry = handler.find_entry_by_83_name("FILE    TXT")
+        assert entry is not None
+        assert entry['raw_short_name'] == "FILE    TXT"
+
+    def test_predict_short_name_collision_sjis(self, tmp_path):
+        img_path = tmp_path / "test_predict_sjis.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # If we have a file "\xE5BCDEFGH.TXT" (stored as 0x05 + BCDEFGHTXT), it decodes to "BCDEFGHTXT"
+        # If we try to add "BCDEFGH.TXT" (candidate "BCDEFGH TXT"), it should NOT collide because names differ.
+        
+        # Manually write the 0x05 entry
+        with open(str(img_path), 'r+b') as f:
+            f.seek(handler.root_start)
+            entry = bytearray(32)
+            entry[0] = 0x05
+            entry[1:11] = b"BCDEFGHTXT" # 10 bytes
+            f.write(entry)
+            
+        # Predict
+        predicted = handler.predict_short_name("BCDEFGH.TXT", use_numeric_tail=True)
+        assert predicted == "BCDEFGH TXT"

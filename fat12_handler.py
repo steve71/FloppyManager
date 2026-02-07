@@ -34,7 +34,7 @@ from vfat_utils import (decode_fat_time, decode_fat_date,
                         encode_fat_time, encode_fat_date, 
                         generate_83_name, calculate_lfn_checksum, 
                         create_lfn_entries, decode_lfn_text,
-                        decode_short_name, format_83_name)
+                        decode_short_name, format_83_name, decode_raw_83_name)
 class FAT12Image:
     """Handler for FAT12 floppy disk images"""
     
@@ -139,13 +139,8 @@ class FAT12Image:
         
         entries = self.read_root_directory()
         for entry in entries:
-            # Reconstruct 11-byte name from the dotted short_name
-            parts = entry['short_name'].split('.')
-            name = parts[0].upper().ljust(8)
-            ext = parts[1].upper().ljust(3) if len(parts) > 1 else "   "
-            raw_name = (name + ext)[:11]
-            
-            if raw_name == target:
+            # Compare against the raw 11-byte name stored in the entry
+            if entry.get('raw_short_name') == target:
                 return entry
         return None
 
@@ -244,6 +239,9 @@ class FAT12Image:
                 if name and name[0] not in ('.', '\x00'):
                     short_name_83 = f"{name}.{ext}" if ext else name
                     
+                    # Store raw 11-byte name for robust collision detection
+                    raw_short_name = decode_raw_83_name(entry_data)
+                    
                     # Check if we have a valid LFN for this entry
                     long_name = None
                     if lfn_parts and lfn_checksum is not None:
@@ -289,6 +287,7 @@ class FAT12Image:
                     entries.append({
                         'name': display_name,
                         'short_name': short_name_83,
+                        'raw_short_name': raw_short_name,
                         'size': size,
                         'cluster': cluster,
                         'file_type': file_type,
@@ -364,8 +363,7 @@ class FAT12Image:
                     continue
                 
                 # Get the 8.3 name (11 bytes, no dot)
-                short_name = entry_data[0:11]
-                names.append(bytes(short_name).decode('ascii', errors='ignore'))
+                names.append(decode_raw_83_name(entry_data))
         
         return names
     

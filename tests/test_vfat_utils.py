@@ -8,7 +8,8 @@ from vfat_utils import (
     calculate_lfn_checksum, create_lfn_entries,
     parse_raw_lfn_entry, parse_raw_short_entry,
     decode_lfn_text, decode_short_name,
-    format_83_name, get_raw_entry_chain
+    format_83_name, get_raw_entry_chain,
+    decode_raw_83_name
 )
 
 class TestTimeDate:
@@ -270,6 +271,19 @@ class TestNameDecoding:
         
         text = decode_lfn_text(entry)
         assert text == "ABC"
+
+    def test_decode_raw_83_name(self):
+        # Standard name
+        assert decode_raw_83_name(b"FILE    TXT") == "FILE    TXT"
+        
+        # 0x05 handling (Shift-JIS 0xE5 marker)
+        # 0x05 -> 0xE5. 
+        data = b"\x05BCDEFGHTXT"
+        # With errors='ignore', 0xE5 (non-ASCII) is dropped.
+        assert decode_raw_83_name(data, errors='ignore') == "BCDEFGHTXT"
+        
+        # With errors='replace' (default), 0xE5 becomes the replacement char ''
+        assert decode_raw_83_name(data) == "\uFFFDBCDEFGHTXT"
 
     def test_decode_short_name(self):
         # Test standard name

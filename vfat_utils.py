@@ -296,9 +296,18 @@ def parse_raw_lfn_entry(entry_data: bytes) -> dict:
     }
 
 
+def decode_raw_83_name(entry_data: bytes, errors: str = 'replace') -> str:
+    """Decode raw 11-byte 8.3 name, handling 0x05 lead byte"""
+    raw = list(entry_data[0:11])
+    if raw[0] == 0x05:
+        raw[0] = 0xE5
+    return bytes(raw).decode('ascii', errors=errors)
+
+
 def parse_raw_short_entry(entry_data: bytes) -> dict:
     """Parse a raw 32-byte short (8.3) entry into a dictionary of fields"""
-    filename = entry_data[0:11].decode('ascii', errors='replace')
+    # Use decode_raw_83_name to handle 0x05 fix, use 'replace' for display
+    filename = decode_raw_83_name(entry_data, errors='replace')
     attributes = entry_data[11]
     reserved = entry_data[12]
     creation_time_tenth = entry_data[13]
