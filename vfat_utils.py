@@ -122,7 +122,9 @@ def generate_83_name(
         # Just uppercase and pad - no numeric tail needed
         base_name = original_name_upper[:8].ljust(8)
         ext_name = original_ext_upper[:3].ljust(3)
-        return base_name + ext_name
+        candidate = base_name + ext_name
+        if candidate not in existing_names or not use_numeric_tail:
+            return candidate
 
     # Name needs modification
     if not use_numeric_tail:

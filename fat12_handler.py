@@ -358,8 +358,8 @@ class FAT12Image:
         short_with_dot = short_name_83[:8].strip() + '.' + short_name_83[8:11].strip()
         short_with_dot = short_with_dot.rstrip('.')
         
-        # Need LFN if original name is different from short name (case-insensitive)
-        needs_lfn = filename.upper() != short_with_dot.upper()
+        # Need LFN if original name is different from short name (preserve case)
+        needs_lfn = filename != short_with_dot
         
         # Create LFN entries if needed
         lfn_entries = []
