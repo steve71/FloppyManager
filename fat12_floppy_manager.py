@@ -85,6 +85,7 @@ class FloppyManagerWindow(QMainWindow):
         self.settings = QSettings('FAT12FloppyManager', 'Settings')
         self.confirm_delete = self.settings.value('confirm_delete', True, type=bool)
         self.confirm_replace = self.settings.value('confirm_replace', True, type=bool)
+        self.show_hidden_files = self.settings.value('show_hidden_files', True, type=bool)
         self.use_numeric_tail = self.settings.value('use_numeric_tail', False, type=bool)
         self.theme_mode = self.settings.value('theme_mode', 'light', type=str)
 
@@ -156,11 +157,11 @@ class FloppyManagerWindow(QMainWindow):
 
         # File table - now with 5 columns
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(['Filename', 'Short Name (8.3)', 'Size', 'Type', 'Index'])
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(['Filename', 'Short Name (8.3)', 'Size', 'Type', 'Attr', 'Index'])
 
         # Hide the index column (used internally)
-        self.table.setColumnHidden(4, True)
+        self.table.setColumnHidden(5, True)
 
         # Configure table
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -187,6 +188,8 @@ class FloppyManagerWindow(QMainWindow):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Short name
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Size
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Type
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)             # Attr
+        self.table.setColumnWidth(4, 50)
 
         # Handle clicks for rename and extract
         self.table.clicked.connect(self.on_table_clicked)
@@ -458,6 +461,12 @@ class FloppyManagerWindow(QMainWindow):
         self.confirm_replace_action.triggered.connect(self.toggle_confirm_replace)
         settings_menu.addAction(self.confirm_replace_action)
 
+        self.show_hidden_action = QAction("Show &Hidden Files", self)
+        self.show_hidden_action.setCheckable(True)
+        self.show_hidden_action.setChecked(self.show_hidden_files)
+        self.show_hidden_action.triggered.connect(self.toggle_show_hidden)
+        settings_menu.addAction(self.show_hidden_action)
+
         settings_menu.addSeparator()
 
         self.use_numeric_tail_action = QAction("Use numeric tails for 8.3 names (~1, ~2, etc.)", self)
@@ -516,6 +525,12 @@ class FloppyManagerWindow(QMainWindow):
         """Toggle replace confirmation"""
         self.confirm_replace = self.confirm_replace_action.isChecked()
         self.settings.setValue('confirm_replace', self.confirm_replace)
+
+    def toggle_show_hidden(self):
+        """Toggle visibility of hidden files"""
+        self.show_hidden_files = self.show_hidden_action.isChecked()
+        self.settings.setValue('show_hidden_files', self.show_hidden_files)
+        self.refresh_file_list()
 
     def toggle_numeric_tail(self):
         """Toggle numeric tail usage for 8.3 name generation"""
@@ -706,6 +721,7 @@ class FloppyManagerWindow(QMainWindow):
         # Set defaults
         self.confirm_delete = True
         self.confirm_replace = True
+        self.show_hidden_files = True
         self.use_numeric_tail = False
         self.theme_mode = 'light'
         
@@ -713,6 +729,7 @@ class FloppyManagerWindow(QMainWindow):
         self.confirm_delete_action.setChecked(True)
         self.confirm_replace_action.setChecked(True)
         self.use_numeric_tail_action.setChecked(False)
+        self.show_hidden_action.setChecked(True)
         self.theme_light_action.setChecked(True)
         
         # Apply light theme
@@ -721,6 +738,7 @@ class FloppyManagerWindow(QMainWindow):
         # Save the default settings
         self.settings.setValue('confirm_delete', True)
         self.settings.setValue('confirm_replace', True)
+        self.settings.setValue('show_hidden_files', True)
         self.settings.setValue('use_numeric_tail', False)
         self.settings.setValue('theme_mode', 'light')
         self.settings.setValue('clusters_per_row', 32)
@@ -778,6 +796,10 @@ class FloppyManagerWindow(QMainWindow):
                 entries = self.image.read_root_directory()
 
                 for entry in entries:
+                    # Filter hidden files if not enabled
+                    if not self.show_hidden_files and entry['is_hidden']:
+                        continue
+
                     if not entry['is_dir']:
                         row = self.table.rowCount()
                         self.table.insertRow(row)
@@ -803,10 +825,34 @@ class FloppyManagerWindow(QMainWindow):
                         type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                         self.table.setItem(row, 3, type_item)
 
+                        # Attr - READ ONLY
+                        attr_str = ""
+                        tooltip_parts = []
+
+                        if entry['is_read_only']:
+                            attr_str += "R"
+                            tooltip_parts.append("Read-only")
+                        if entry['is_hidden']:
+                            attr_str += "H"
+                            tooltip_parts.append("Hidden")
+                        if entry['is_system']:
+                            attr_str += "S"
+                            tooltip_parts.append("System")
+                        if entry['is_archive']:
+                            attr_str += "A"
+                            tooltip_parts.append("Archive")
+
+                        attr_item = QTableWidgetItem(attr_str)
+                        if tooltip_parts:
+                            attr_item.setToolTip(", ".join(tooltip_parts))
+                        attr_item.setFlags(attr_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                        attr_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        self.table.setItem(row, 4, attr_item)
+
                         # Index (hidden) - READ ONLY
                         index_item = QTableWidgetItem(str(entry['index']))
                         index_item.setFlags(index_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                        self.table.setItem(row, 4, index_item)
+                        self.table.setItem(row, 5, index_item)
 
                 # Update info
                 self.info_label.setText(f"{len(entries)} files | {self.image.get_free_space():,} bytes free")
@@ -1090,12 +1136,31 @@ class FloppyManagerWindow(QMainWindow):
 
         entries = self.image.read_root_directory()
         success_count = 0
+        files_to_delete = []
+        read_only_files = []
 
         for row in selected_rows:
-            entry_index = int(self.table.item(row, 4).text())
+            entry_index = int(self.table.item(row, 5).text())
             entry = next((e for e in entries if e['index'] == entry_index), None)
-
             if entry:
+                files_to_delete.append(entry)
+                if entry['is_read_only']:
+                    read_only_files.append(entry)
+
+        # Warn about read-only files
+        if read_only_files:
+            msg = f"{len(read_only_files)} of the selected files are Read-Only.\n\nDo you want to delete them anyway?"
+            response = QMessageBox.warning(
+                self,
+                "Read-Only Files",
+                msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if response == QMessageBox.StandardButton.No:
+                return
+
+        # Proceed with deletion
+        for entry in files_to_delete:
                 if self.image.delete_file(entry):
                     success_count += 1
                 else:
@@ -1124,6 +1189,19 @@ class FloppyManagerWindow(QMainWindow):
                 self,
                 "Confirm Delete All",
                 f"Delete ALL {len(files_to_delete)} file(s) from the disk image?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if response == QMessageBox.StandardButton.No:
+                return
+
+        # Check for read-only files
+        read_only_files = [e for e in files_to_delete if e['is_read_only']]
+        if read_only_files:
+            msg = f"{len(read_only_files)} of the files are Read-Only.\n\nDo you want to delete them anyway?"
+            response = QMessageBox.warning(
+                self,
+                "Read-Only Files",
+                msg,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if response == QMessageBox.StandardButton.No:
@@ -1447,7 +1525,7 @@ class FloppyManagerWindow(QMainWindow):
         row = list(selected_rows)[0]
         
         # Get the file entry from the hidden index column
-        index = int(self.table.item(row, 4).text())
+        index = int(self.table.item(row, 5).text())
         entries = self.image.read_root_directory()
         entry = next((e for e in entries if e['index'] == index), None)
         
@@ -1503,7 +1581,7 @@ class FloppyManagerWindow(QMainWindow):
             row = item.row()
             
             # Get the entry index from the hidden column
-            index_item = self.table.item(row, 4)
+            index_item = self.table.item(row, 5)
             if not index_item:
                 self._editing_in_progress = False
                 return
