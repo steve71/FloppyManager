@@ -177,6 +177,50 @@ class TestClusterManagement:
         fat = handler.read_fat()
         assert handler.get_fat_entry(fat, 2) == 0
 
+    def test_format_disk_cleans_fat_and_root(self, tmp_path):
+        img_path = tmp_path / "test_format_clean.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Fill up some clusters
+        handler.write_file_to_image("file1.txt", b"A" * 2048) # 4 clusters
+        
+        # Verify FAT is used
+        fat_before = handler.read_fat()
+        assert handler.get_fat_entry(fat_before, 2) != 0
+        
+        handler.format_disk()
+        
+        # Verify FAT is reset
+        fat_after = handler.read_fat()
+        
+        # Check Media Descriptor (0xF0 for 1.44MB)
+        assert fat_after[0] == 0xF0
+        assert fat_after[1] == 0xFF
+        assert fat_after[2] == 0xFF
+        
+        # Check rest of FAT is 0
+        assert all(b == 0 for b in fat_after[3:])
+        
+        # Verify Root Directory is zeroed
+        with open(str(img_path), 'rb') as f:
+            f.seek(handler.root_start)
+            root_data = f.read(handler.root_size)
+            assert all(b == 0 for b in root_data)
+            
+        # Verify second FAT copy is also reset
+        fat_size = handler.sectors_per_fat * handler.bytes_per_sector
+        fat2_start = handler.fat_start + fat_size
+        
+        with open(str(img_path), 'rb') as f:
+            f.seek(fat2_start)
+            fat2_data = f.read(fat_size)
+            
+            assert fat2_data[0] == 0xF0
+            assert fat2_data[1] == 0xFF
+            assert fat2_data[2] == 0xFF
+            assert all(b == 0 for b in fat2_data[3:])
+
 class TestFileIO:
     def test_write_and_read_file(self, tmp_path):
         img_path = tmp_path / "test_io.img"
