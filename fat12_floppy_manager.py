@@ -46,7 +46,7 @@ from PyQt6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, QC
 
 # Import the FAT12 handler
 from fat12_handler import FAT12Image
-from gui_components import BootSectorViewer, RootDirectoryViewer, FATViewer
+from gui_components import BootSectorViewer, RootDirectoryViewer, FATViewer, FileAttributesDialog
 
 from PyQt6.QtWidgets import QStyledItemDelegate, QLineEdit
 
@@ -342,12 +342,17 @@ class FloppyManagerWindow(QMainWindow):
 
         menu = QMenu()
         
-        # Only show rename if exactly one file is selected
+        # Only show rename and properties if exactly one file is selected
         if len(selected_rows) == 1:
             rename_action = QAction("Rename", self)
             rename_action.setShortcut(Qt.Key.Key_F2)
             rename_action.triggered.connect(self.start_rename)
             menu.addAction(rename_action)
+            
+            properties_action = QAction("Properties...", self)
+            properties_action.setShortcut("Alt+Return")
+            properties_action.triggered.connect(self.edit_file_attributes)
+            menu.addAction(properties_action)
             menu.addSeparator()
         
         extract_action = QAction("Extract", self)
@@ -411,6 +416,14 @@ class FloppyManagerWindow(QMainWindow):
         rename_action.setToolTip("Rename selected file (F2)")
         rename_action.triggered.connect(self.start_rename)
         edit_menu.addAction(rename_action)
+        
+        edit_menu.addSeparator()
+        
+        properties_action = QAction("&Properties...", self)
+        properties_action.setShortcut("Alt+Return")
+        properties_action.setToolTip("Edit file attributes (Alt+Enter)")
+        properties_action.triggered.connect(self.edit_file_attributes)
+        edit_menu.addAction(properties_action)
 
         # View menu
         view_menu = menubar.addMenu("&View")
@@ -725,6 +738,9 @@ class FloppyManagerWindow(QMainWindow):
         """Handle keyboard events in the table"""
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.delete_selected()
+        elif event.key() == Qt.Key.Key_Return and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            # Alt+Return opens properties dialog
+            self.edit_file_attributes()
         else:
             # Call the original keyPressEvent
             QTableWidget.keyPressEvent(self.table, event)
@@ -1412,6 +1428,57 @@ class FloppyManagerWindow(QMainWindow):
         
         # Disable editing triggers after a moment (after editor is created)
         QTimer.singleShot(100, lambda: self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers))
+    
+    def edit_file_attributes(self):
+        """Open the file attributes editor dialog"""
+        if not self.image:
+            return
+        
+        # Get selected row
+        selected_rows = set(item.row() for item in self.table.selectedItems())
+        if len(selected_rows) != 1:
+            QMessageBox.information(
+                self,
+                "Select One File",
+                "Please select exactly one file to edit attributes."
+            )
+            return
+        
+        row = list(selected_rows)[0]
+        
+        # Get the file entry from the hidden index column
+        index = int(self.table.item(row, 4).text())
+        entries = self.image.read_root_directory()
+        entry = next((e for e in entries if e['index'] == index), None)
+        
+        if not entry:
+            QMessageBox.warning(self, "Error", "Could not find file entry.")
+            return
+        
+        # Show the attributes dialog
+        dialog = FileAttributesDialog(entry, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Get the new attributes
+            attrs = dialog.get_attributes()
+            
+            # Update the attributes
+            success = self.image.set_file_attributes(
+                entry,
+                is_read_only=attrs['is_read_only'],
+                is_hidden=attrs['is_hidden'],
+                is_system=attrs['is_system'],
+                is_archive=attrs['is_archive']
+            )
+            
+            if success:
+                self.status_bar.showMessage(f"Attributes updated for {entry['name']}", 3000)
+                self.refresh_file_list()
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to update attributes for {entry['name']}"
+                )
     
     def on_item_changed(self, item):
         """Handle item changes (when rename is completed)"""

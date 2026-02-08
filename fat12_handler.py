@@ -812,6 +812,69 @@ class FAT12Image:
                 f.seek(fat_start + (i * fat_size))
                 f.write(fat_data)
     
+
+    def set_file_attributes(self, entry: dict, is_read_only: bool = None, 
+                           is_hidden: bool = None, is_system: bool = None, 
+                           is_archive: bool = None) -> bool:
+        """
+        Modify file attributes for a directory entry.
+        
+        Args:
+            entry: Directory entry dictionary (must contain 'index' and 'attributes')
+            is_read_only: Set read-only flag (None = no change)
+            is_hidden: Set hidden flag (None = no change)
+            is_system: Set system flag (None = no change)
+            is_archive: Set archive flag (None = no change)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Start with current attributes
+            current_attr = entry['attributes']
+            new_attr = current_attr
+            
+            # Modify flags as requested (only if not None)
+            if is_read_only is not None:
+                if is_read_only:
+                    new_attr |= 0x01  # Set read-only bit
+                else:
+                    new_attr &= ~0x01  # Clear read-only bit
+            
+            if is_hidden is not None:
+                if is_hidden:
+                    new_attr |= 0x02  # Set hidden bit
+                else:
+                    new_attr &= ~0x02  # Clear hidden bit
+            
+            if is_system is not None:
+                if is_system:
+                    new_attr |= 0x04  # Set system bit
+                else:
+                    new_attr &= ~0x04  # Clear system bit
+            
+            if is_archive is not None:
+                if is_archive:
+                    new_attr |= 0x20  # Set archive bit
+                else:
+                    new_attr &= ~0x20  # Clear archive bit
+            
+            # Preserve directory bit (0x10) - can't change this
+            # Preserve volume label bit (0x08) - can't change this
+            # These are structural attributes, not user-modifiable
+            
+            # Write the new attribute byte to disk
+            with open(self.image_path, 'r+b') as f:
+                # Attribute byte is at offset 11 in the directory entry
+                f.seek(self.root_start + (entry['index'] * 32) + 11)
+                f.write(bytes([new_attr]))
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error setting file attributes: {e}")
+            return False
+
     def format_disk(self):
         """Format the disk - erase all files and reset FAT to clean state"""
         with open(self.image_path, 'r+b') as f:

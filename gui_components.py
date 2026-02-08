@@ -684,3 +684,88 @@ class FATViewer(QDialog):
         # Add spacer to push everything to top-left
         grid_layout.setRowStretch(num_rows + 1, 1)
         grid_layout.setColumnStretch(clusters_per_row + 1, 1)
+
+class FileAttributesDialog(QDialog):
+    """Dialog for editing file attributes"""
+    
+    def __init__(self, entry: dict, parent=None):
+        super().__init__(parent)
+        self.entry = entry
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup the attributes editor UI"""
+        self.setWindowTitle(f"File Attributes - {self.entry['name']}")
+        self.setModal(True)
+        
+        layout = QVBoxLayout(self)
+        
+        # Info label
+        info_label = QLabel(f"<b>File:</b> {self.entry['name']}")
+        layout.addWidget(info_label)
+        
+        # Add spacing
+        layout.addSpacing(10)
+        
+        # Create checkboxes for each attribute
+        from PyQt6.QtWidgets import QCheckBox, QGroupBox
+        
+        attr_group = QGroupBox("File Attributes")
+        attr_layout = QVBoxLayout()
+        
+        # Read-only checkbox
+        self.readonly_cb = QCheckBox("Read-only")
+        self.readonly_cb.setChecked(self.entry['is_read_only'])
+        self.readonly_cb.setToolTip("Prevents the file from being modified or deleted")
+        attr_layout.addWidget(self.readonly_cb)
+        
+        # Hidden checkbox
+        self.hidden_cb = QCheckBox("Hidden")
+        self.hidden_cb.setChecked(self.entry['is_hidden'])
+        self.hidden_cb.setToolTip("Hides the file from normal directory listings")
+        attr_layout.addWidget(self.hidden_cb)
+        
+        # System checkbox
+        self.system_cb = QCheckBox("System")
+        self.system_cb.setChecked(self.entry['is_system'])
+        self.system_cb.setToolTip("Marks the file as a system file")
+        attr_layout.addWidget(self.system_cb)
+        
+        # Archive checkbox
+        self.archive_cb = QCheckBox("Archive")
+        self.archive_cb.setChecked(self.entry['is_archive'])
+        self.archive_cb.setToolTip("Indicates the file has been modified since last backup")
+        attr_layout.addWidget(self.archive_cb)
+        
+        attr_group.setLayout(attr_layout)
+        layout.addWidget(attr_group)
+        
+        # Buttons
+        layout.addSpacing(10)
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedWidth(80)
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        ok_btn = QPushButton("OK")
+        ok_btn.setFixedWidth(80)
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self.accept)
+        button_layout.addWidget(ok_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Set fixed size
+        self.setFixedSize(300, 240)
+    
+    def get_attributes(self):
+        """Get the selected attributes as a dictionary"""
+        return {
+            'is_read_only': self.readonly_cb.isChecked(),
+            'is_hidden': self.hidden_cb.isChecked(),
+            'is_system': self.system_cb.isChecked(),
+            'is_archive': self.archive_cb.isChecked(),
+        }

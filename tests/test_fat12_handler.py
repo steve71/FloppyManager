@@ -994,3 +994,258 @@ class TestHelperMethods:
         # Predict
         predicted = handler.predict_short_name("BCDEFGH.TXT", use_numeric_tail=True)
         assert predicted == "BCDEFGH TXT"
+class TestFileAttributes:
+    """Test file attribute modification functionality"""
+    
+    def test_set_read_only_attribute(self, tmp_path):
+        """Test setting read-only attribute"""
+        img_path = tmp_path / "test.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Add a test file
+        test_data = b"Test file content"
+        assert handler.write_file_to_image("TESTFILE.TXT", test_data)
+        
+        # Get the file entry
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "TESTFILE.TXT")
+        
+        # Initially should not be read-only
+        assert not entry['is_read_only']
+        assert entry['attributes'] == 0x20  # Archive bit only
+        
+        # Set read-only
+        assert handler.set_file_attributes(entry, is_read_only=True)
+        
+        # Verify it was set
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "TESTFILE.TXT")
+        assert entry['is_read_only']
+        assert entry['attributes'] & 0x01  # Read-only bit set
+        assert entry['attributes'] & 0x20  # Archive bit still set
+        
+        # Clear read-only
+        assert handler.set_file_attributes(entry, is_read_only=False)
+        
+        # Verify it was cleared
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "TESTFILE.TXT")
+        assert not entry['is_read_only']
+        assert not (entry['attributes'] & 0x01)  # Read-only bit cleared
+        assert entry['attributes'] & 0x20  # Archive bit still set
+    
+    def test_set_hidden_attribute(self, tmp_path):
+        """Test setting hidden attribute"""
+        img_path = tmp_path / "test.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Add a test file
+        test_data = b"Test file content"
+        assert handler.write_file_to_image("HIDDEN.TXT", test_data)
+        
+        # Get the file entry
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "HIDDEN.TXT")
+        
+        # Initially should not be hidden
+        assert not entry['is_hidden']
+        
+        # Set hidden
+        assert handler.set_file_attributes(entry, is_hidden=True)
+        
+        # Verify it was set
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "HIDDEN.TXT")
+        assert entry['is_hidden']
+        assert entry['attributes'] & 0x02  # Hidden bit set
+        
+        # Clear hidden
+        assert handler.set_file_attributes(entry, is_hidden=False)
+        
+        # Verify it was cleared
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "HIDDEN.TXT")
+        assert not entry['is_hidden']
+        assert not (entry['attributes'] & 0x02)  # Hidden bit cleared
+    
+    def test_set_system_attribute(self, tmp_path):
+        """Test setting system attribute"""
+        img_path = tmp_path / "test.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Add a test file
+        test_data = b"Test file content"
+        assert handler.write_file_to_image("SYSTEM.SYS", test_data)
+        
+        # Get the file entry
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "SYSTEM.SYS")
+        
+        # Initially should not be system
+        assert not entry['is_system']
+        
+        # Set system
+        assert handler.set_file_attributes(entry, is_system=True)
+        
+        # Verify it was set
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "SYSTEM.SYS")
+        assert entry['is_system']
+        assert entry['attributes'] & 0x04  # System bit set
+    
+    def test_set_archive_attribute(self, tmp_path):
+        """Test setting archive attribute"""
+        img_path = tmp_path / "test.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Add a test file
+        test_data = b"Test file content"
+        assert handler.write_file_to_image("ARCHIVE.TXT", test_data)
+        
+        # Get the file entry
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "ARCHIVE.TXT")
+        
+        # Initially should be archive (set by default)
+        assert entry['is_archive']
+        
+        # Clear archive
+        assert handler.set_file_attributes(entry, is_archive=False)
+        
+        # Verify it was cleared
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "ARCHIVE.TXT")
+        assert not entry['is_archive']
+        assert not (entry['attributes'] & 0x20)  # Archive bit cleared
+        
+        # Set archive again
+        assert handler.set_file_attributes(entry, is_archive=True)
+        
+        # Verify it was set
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "ARCHIVE.TXT")
+        assert entry['is_archive']
+        assert entry['attributes'] & 0x20  # Archive bit set
+    
+    def test_set_multiple_attributes(self, tmp_path):
+        """Test setting multiple attributes at once"""
+        img_path = tmp_path / "test.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Add a test file
+        test_data = b"Test file content"
+        assert handler.write_file_to_image("MULTI.TXT", test_data)
+        
+        # Get the file entry
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "MULTI.TXT")
+        
+        # Set multiple attributes at once
+        assert handler.set_file_attributes(
+            entry, 
+            is_read_only=True, 
+            is_hidden=True, 
+            is_system=True
+        )
+        
+        # Verify all were set
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "MULTI.TXT")
+        assert entry['is_read_only']
+        assert entry['is_hidden']
+        assert entry['is_system']
+        assert entry['is_archive']  # Archive should still be set
+        
+        # Verify the raw attribute byte
+        expected_attr = 0x01 | 0x02 | 0x04 | 0x20  # R+H+S+A
+        assert entry['attributes'] == expected_attr
+    
+    def test_partial_attribute_update(self, tmp_path):
+        """Test updating only some attributes (None means no change)"""
+        img_path = tmp_path / "test.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Add a test file
+        test_data = b"Test file content"
+        assert handler.write_file_to_image("PARTIAL.TXT", test_data)
+        
+        # Get the file entry
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "PARTIAL.TXT")
+        
+        # Set read-only and hidden
+        assert handler.set_file_attributes(entry, is_read_only=True, is_hidden=True)
+        
+        # Now only change archive, leaving read-only and hidden alone
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "PARTIAL.TXT")
+        assert handler.set_file_attributes(entry, is_archive=False)
+        
+        # Verify read-only and hidden are still set, but archive is cleared
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "PARTIAL.TXT")
+        assert entry['is_read_only']
+        assert entry['is_hidden']
+        assert not entry['is_archive']
+        assert not entry['is_system']
+    
+    def test_attribute_bits_preserved(self, tmp_path):
+        """Test that directory bit (0x10) is preserved and can't be modified"""
+        img_path = tmp_path / "test.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Add a test file
+        test_data = b"Test file content"
+        assert handler.write_file_to_image("PRESERVE.TXT", test_data)
+        
+        # Get the file entry
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "PRESERVE.TXT")
+        
+        # Store original attributes
+        original_attr = entry['attributes']
+        assert not (original_attr & 0x10)  # Should not be a directory
+        
+        # Try to set various attributes
+        assert handler.set_file_attributes(entry, is_read_only=True, is_hidden=True)
+        
+        # Verify directory bit is still clear
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "PRESERVE.TXT")
+        assert not (entry['attributes'] & 0x10)  # Still not a directory
+        assert not entry['is_dir']  # is_dir flag should be False
+    
+    def test_attributes_with_long_filename(self, tmp_path):
+        """Test that attributes work correctly with files that have LFN entries"""
+        img_path = tmp_path / "test.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Add a file with a long name that needs LFN entries
+        test_data = b"Test file content"
+        long_name = "This is a very long filename.txt"
+        assert handler.write_file_to_image(long_name, test_data)
+        
+        # Get the file entry
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == long_name)
+        
+        # Set attributes
+        assert handler.set_file_attributes(entry, is_read_only=True, is_hidden=True)
+        
+        # Verify attributes are set correctly
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == long_name)
+        assert entry['is_read_only']
+        assert entry['is_hidden']
+        
+        # Verify the file can still be read correctly
+        assert len(entries) > 0
+        assert entry['name'] == long_name
