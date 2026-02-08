@@ -27,6 +27,7 @@ Core functionality for reading/writing FAT12 floppy disk images with VFAT long f
 
 import struct
 import datetime
+import random
 from pathlib import Path
 from typing import List, Optional
 
@@ -44,6 +45,70 @@ class FAT12Image:
     CLUSTER_BAD = 'BAD'
     CLUSTER_EOF = 'EOF'
     CLUSTER_USED = 'USED'
+
+    # Supported Floppy Formats
+    FORMATS = {
+        '1.44M': {
+            'name': '3.5" High Density (1.44 MB)',
+            'total_sectors': 2880,
+            'sectors_per_cluster': 1,
+            'sectors_per_track': 18,
+            'heads': 2,
+            'root_entries': 224,
+            'media_descriptor': 0xF0,
+            'sectors_per_fat': 9,
+            'reserved_sectors': 1,
+            'hidden_sectors': 0
+        },
+        '720K': {
+            'name': '3.5" Double Density (720 KB)',
+            'total_sectors': 1440,
+            'sectors_per_cluster': 2,
+            'sectors_per_track': 9,
+            'heads': 2,
+            'root_entries': 112,
+            'media_descriptor': 0xF9,
+            'sectors_per_fat': 3,
+            'reserved_sectors': 1,
+            'hidden_sectors': 0
+        },
+        '2.88M': {
+            'name': '3.5" Extra High Density (2.88 MB)',
+            'total_sectors': 5760,
+            'sectors_per_cluster': 2,
+            'sectors_per_track': 36,
+            'heads': 2,
+            'root_entries': 224,
+            'media_descriptor': 0xF0,
+            'sectors_per_fat': 9,
+            'reserved_sectors': 1,
+            'hidden_sectors': 0
+        },
+        '1.2M': {
+            'name': '5.25" High Density (1.2 MB)',
+            'total_sectors': 2400,
+            'sectors_per_cluster': 1,
+            'sectors_per_track': 15,
+            'heads': 2,
+            'root_entries': 224,
+            'media_descriptor': 0xF9,
+            'sectors_per_fat': 7,
+            'reserved_sectors': 1,
+            'hidden_sectors': 0
+        },
+        '360K': {
+            'name': '5.25" Double Density (360 KB)',
+            'total_sectors': 720,
+            'sectors_per_cluster': 2,
+            'sectors_per_track': 9,
+            'heads': 2,
+            'root_entries': 112,
+            'media_descriptor': 0xFD,
+            'sectors_per_fat': 2,
+            'reserved_sectors': 1,
+            'hidden_sectors': 0
+        }
+    }
 
     def __init__(self, image_path: str):
         self.image_path = image_path
@@ -769,18 +834,24 @@ class FAT12Image:
         return bytes(data[:entry['size']])
     
     @staticmethod
-    def create_empty_image(filepath: str):
-        """Create a blank FAT12 floppy disk image (1.44 MB)"""
+    def create_empty_image(filepath: str, format_key: str = '1.44M'):
+        """Create a blank FAT12 floppy disk image"""
+        if format_key not in FAT12Image.FORMATS:
+            raise ValueError(f"Unknown format: {format_key}")
+            
+        fmt = FAT12Image.FORMATS[format_key]
+        
         bytes_per_sector = 512
-        sectors_per_cluster = 1
-        reserved_sectors = 1
+        sectors_per_cluster = fmt['sectors_per_cluster']
+        reserved_sectors = fmt['reserved_sectors']
         num_fats = 2
-        root_entries = 224
-        total_sectors = 2880
-        media_descriptor = 0xF0
-        sectors_per_fat = 9
-        sectors_per_track = 18
-        heads = 2
+        root_entries = fmt['root_entries']
+        total_sectors = fmt['total_sectors']
+        media_descriptor = fmt['media_descriptor']
+        sectors_per_fat = fmt['sectors_per_fat']
+        sectors_per_track = fmt['sectors_per_track']
+        heads = fmt['heads']
+        hidden_sectors = fmt['hidden_sectors']
         
         total_size = total_sectors * bytes_per_sector
         
@@ -801,6 +872,18 @@ class FAT12Image:
             boot_sector[22:24] = sectors_per_fat.to_bytes(2, 'little')
             boot_sector[24:26] = sectors_per_track.to_bytes(2, 'little')
             boot_sector[26:28] = heads.to_bytes(2, 'little')
+            boot_sector[28:32] = hidden_sectors.to_bytes(4, 'little')
+            
+            # Extended BPB
+            boot_sector[36] = 0x00 # Drive number
+            boot_sector[37] = 0x00 # Reserved
+            boot_sector[38] = 0x29 # Boot signature
+            # Volume ID (random)
+            vol_id = random.getrandbits(32)
+            boot_sector[39:43] = vol_id.to_bytes(4, 'little')
+            boot_sector[43:54] = b'NO NAME    ' # Volume Label
+            boot_sector[54:62] = b'FAT12   '    # FS Type
+            
             boot_sector[510:512] = b'\x55\xAA'
             
             f.write(boot_sector)

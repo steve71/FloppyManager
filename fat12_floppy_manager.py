@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QFileDialog,
     QMessageBox, QLabel, QStatusBar, QMenuBar, QMenu, QHeaderView,
-    QDialog, QTabWidget, QToolBar, QStyle, QSizePolicy
+    QDialog, QTabWidget, QToolBar, QStyle, QSizePolicy, QInputDialog
 )
 from PyQt6.QtCore import Qt, QSettings, QTimer, QSize, QMimeData, QUrl
 from PyQt6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, QColor, QDrag
@@ -1396,6 +1396,25 @@ class FloppyManagerWindow(QMainWindow):
 
     def create_new_image(self):
         """Create a new blank floppy disk image"""
+        # Ask for format
+        formats = list(FAT12Image.FORMATS.keys())
+        display_names = [FAT12Image.FORMATS[k]['name'] for k in formats]
+        
+        item, ok = QInputDialog.getItem(
+            self, 
+            "Select Disk Format", 
+            "Choose floppy disk format:", 
+            display_names, 
+            0, # Default to first (1.44M)
+            False # Not editable
+        )
+        
+        if not ok or not item:
+            return
+            
+        # Map back to key
+        selected_key = formats[display_names.index(item)]
+
         filename, _ = QFileDialog.getSaveFileName(
             self,
             "Create New Floppy Image",
@@ -1412,6 +1431,7 @@ class FloppyManagerWindow(QMainWindow):
 
         try:
             # Create a blank 1.44MB floppy image using the handler
+            FAT12Image.create_empty_image(filename, selected_key)
             FAT12Image.create_empty_image(filename)
 
             # Load the new image
@@ -1420,6 +1440,7 @@ class FloppyManagerWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Success",
+                f"Created new {item} image:\n{Path(filename).name}"
                 f"Created new floppy image:\n{Path(filename).name}"
             )
         except Exception as e:
@@ -1465,7 +1486,6 @@ class FloppyManagerWindow(QMainWindow):
             QMessageBox.information(self, "No Image Loaded", "No image loaded to format.")
             return
         
-        # Show warning dialog
         response = QMessageBox.warning(
             self,
             "Format Disk",
