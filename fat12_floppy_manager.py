@@ -271,6 +271,17 @@ class FloppyManagerWindow(QMainWindow):
         # Main layout
         layout = QVBoxLayout(central_widget)
 
+        # Search/Filter Bar
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Filter:")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search by filename...")
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.textChanged.connect(self.on_search_text_changed)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.search_input)
+        layout.addLayout(search_layout)
+
         # File table - now with 7 columns
         self.table = FileTableWidget()
         self.table.setColumnCount(7)
@@ -898,6 +909,10 @@ class FloppyManagerWindow(QMainWindow):
             self.image_path = None
             self.setWindowTitle("FAT12 Floppy Manager")
 
+    def on_search_text_changed(self, text):
+        """Handle search text changes"""
+        self.refresh_file_list()
+
     def refresh_file_list(self):
         """Refresh the file list from the image"""
         # Block signals to prevent itemChanged from firing during population
@@ -912,12 +927,24 @@ class FloppyManagerWindow(QMainWindow):
             try:
                 entries = self.image.read_root_directory()
 
+                # Get search text
+                search_text = self.search_input.text().lower().strip() if hasattr(self, 'search_input') else ""
+                
+                total_files_count = 0
+
                 for entry in entries:
                     # Filter hidden files if not enabled
                     if not self.show_hidden_files and entry['is_hidden']:
                         continue
 
                     if not entry['is_dir']:
+                        total_files_count += 1
+                        
+                        # Apply search filter (filename only)
+                        if search_text and (search_text not in entry['name'].lower() and 
+                                          search_text not in entry['short_name'].lower()):
+                            continue
+
                         row = self.table.rowCount()
                         self.table.insertRow(row)
 
@@ -992,8 +1019,12 @@ class FloppyManagerWindow(QMainWindow):
                         self.table.setItem(row, 6, index_item)
 
                 # Update info
-                self.info_label.setText(f"{len(entries)} files | {self.image.get_free_space():,} bytes free")
-                self.status_bar.showMessage(f"Loaded {len(entries)} files")
+                visible_count = self.table.rowCount()
+                if search_text:
+                    self.info_label.setText(f"Showing {visible_count} of {total_files_count} files | {self.image.get_free_space():,} bytes free")
+                else:
+                    self.info_label.setText(f"{visible_count} files | {self.image.get_free_space():,} bytes free")
+                self.status_bar.showMessage(f"Loaded {visible_count} files")
 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to read directory: {e}")
