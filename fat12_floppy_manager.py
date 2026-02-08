@@ -1515,26 +1515,36 @@ class FloppyManagerWindow(QMainWindow):
         <p>A modern tool for managing files on FAT12 floppy disk images with VFAT long filename support.</p>
 
         <p><b>Features:</b></p>
+        <table border="0" width="100%">
+        <tr>
+        <td valign="top" width="50%">
         <ul>
         <li>FAT12 filesystem support with VFAT long filenames</li>
-        <li>Windows-compatible 8.3 name generation with numeric tails</li>
-        <li>Toggleable numeric tail mode (Windows-style vs. simple truncation)</li>
+        <li>Windows-compatible 8.3 name generation</li>
+        <li>Toggleable numeric tail mode</li>
         <li>Create new blank floppy images</li>
-        <li>Writes directly to the image file without needing to mount it as a drive</li>
-        <li>Displays both long filenames and 8.3 short names</li>
+        <li>Writes directly to image (no mounting)</li>
+        <li>Displays long filenames and 8.3 short names</li>
         <li>Save copies of floppy images</li>
-        <li>Drag and drop support (add files by dropping in, extract by dragging out)</li>
-        <li>View and edit file attributes (Read-only, Hidden, System, Archive)</li>
-        <li>Rename files (Windows-style inline editing)</li>
+        <li>Drag and drop support</li>
+        <li>View and edit file attributes</li>
+        </ul>
+        </td>
+
+        <td valign="top" width="50%">
+        <ul>
+        <li>Rename files (Windows-style inline)</li>
         <li>Delete files (selected or all)</li>
         <li>Extract files (selected, all, or to ZIP)</li>
         <li>Format disk</li>
-        <li>Boot Sector Viewer (BPB & Geometry)</li>
-        <li>Root Directory Viewer (Raw entries & LFNs)</li>
-        <li>FAT Viewer (Cluster map & chains)</li>
+        <li>Search/Filter files by filename</li>
+        <li>Boot Sector, Root Dir & FAT Viewers</li>
         <li>Modern UI with Toolbar and Light/Dark themes</li>
         <li>Remembers last opened image and settings</li>
         </ul>
+        </td>
+        </tr>
+        </table>
 
         <p><b>Keyboard Shortcuts:</b></p>
         <ul>

@@ -73,6 +73,7 @@ dist\FAT12 Floppy Manager.exe
 - **Extract files** - Extract selected files, all files, drag to extract, or export all to a ZIP archive
 - **Format disk** - Erase all files and reset the disk to empty state
 - **Sort columns** - Click any column header
+- **Search/Filter** - Filter files by filename
 - **Disk space** - Real-time monitoring
 
 ### Viewers & Tools
