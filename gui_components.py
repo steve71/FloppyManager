@@ -6,15 +6,15 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, 
     QTabWidget, QHeaderView, QPushButton, QLabel, QGridLayout,
     QWidget, QScrollArea, QSizePolicy, QSpinBox, QFrame, QApplication,
     QTreeWidget, QTreeWidgetItem, QStyledItemDelegate, QLineEdit,
     QRadioButton, QDialogButtonBox, QMessageBox
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, QMimeData, QUrl
-from PyQt6.QtGui import QColor, QPalette, QDrag
+from PySide6.QtCore import Qt, QSize, QTimer, QMimeData, QUrl
+from PySide6.QtGui import QColor, QPalette, QDrag
 
 # Import the FAT12 handler
 from fat12_handler import FAT12Image
@@ -351,7 +351,7 @@ class FATViewer(QDialog):
         self.cluster_to_file = {}  # Map cluster number to filename
         
         # Load settings
-        from PyQt6.QtCore import QSettings
+        from PySide6.QtCore import QSettings
         self.settings = QSettings('FAT12FloppyManager', 'Settings')
         
         self.setup_ui()
@@ -744,7 +744,7 @@ class FileAttributesDialog(QDialog):
         layout.addSpacing(10)
         
         # Create checkboxes for each attribute
-        from PyQt6.QtWidgets import QCheckBox, QGroupBox
+        from PySide6.QtWidgets import QCheckBox, QGroupBox
         
         attr_group = QGroupBox(f"{type_label} Attributes")
         attr_layout = QVBoxLayout()

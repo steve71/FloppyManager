@@ -20,13 +20,13 @@ from datetime import datetime
 from vfat_utils import format_83_name, decode_fat_datetime
 
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTreeWidget, QFileDialog, QMessageBox, QLabel, QStatusBar, QMenu,
     QDialog, QToolBar, QStyle, QInputDialog, QHeaderView
 )
-from PyQt6.QtCore import Qt, QSettings, QTimer, QSize
-from PyQt6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, QColor
+from PySide6.QtCore import Qt, QSettings, QTimer, QSize
+from PySide6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, QColor
 
 # Import the FAT12 handler
 from fat12_handler import FAT12Image
@@ -35,7 +35,7 @@ from gui_components import (
     SortableTreeWidgetItem, FileTreeWidget, RenameDelegate, FormatDialog
 )
 
-from PyQt6.QtWidgets import QLineEdit
+from PySide6.QtWidgets import QLineEdit
 
 class FloppyManagerWindow(QMainWindow):
     """Main window for the floppy manager"""

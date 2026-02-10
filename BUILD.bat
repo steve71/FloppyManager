@@ -31,12 +31,12 @@ if errorlevel 1 (
 echo.
 echo [2/3] Installing required packages...
 echo This may take a minute...
-python -m pip install PyQt6 pyinstaller --quiet --disable-pip-version-check
+python -m pip install PySide6 pyinstaller --quiet --disable-pip-version-check
 if errorlevel 1 (
     echo.
     echo   Warning: Quick install failed, trying with verbose output...
     echo.
-    python -m pip install PyQt6 pyinstaller
+    python -m pip install PySide6 pyinstaller
     if errorlevel 1 (
         echo.
         echo   [X] Installation failed
@@ -75,7 +75,7 @@ if exist "dist\FAT12 Floppy Manager.exe" (
     echo   Your executable is ready!
     echo   Location: dist\FAT12 Floppy Manager.exe
     echo.
-    echo   File size: ~30 MB (includes PyQt6 runtime^)
+    echo   File size: ~30 MB (includes PySide6 runtime^)
     echo.
     echo   NEXT STEPS:
     echo   1. Open the "dist" folder

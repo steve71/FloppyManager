@@ -1,6 +1,6 @@
 # FAT12 Floppy Manager
 
-## Python PyQt GUI for managing FAT12 floppy disk images
+## Python PySide6 GUI for managing FAT12 floppy disk images
 
 A modern GUI tool designed for managing FAT12 formatted floppy disk images (.img) used in Yamaha keyboards like the **DGX-500**, **PSR series**, and **Clavinova** or other vintage keyboards. Currently verified to work with Yamaha DGX-500.
 
@@ -36,15 +36,15 @@ Verified to work on my Yamaha DGX-500 keyboard and Gotek SFR1M44-U100LQD 3.5inch
 Make sure Python is installed
 ```
 - If not installed, install from python.org
-- Install pip, Pyinstaller and PyQt6
+- Install pip, Pyinstaller and PySide6
 
-### 2️ Build Application  
+### 2 Build Application  
 ```
 Double-click: BUILD.bat
 ```
 - Builds executable
 
-### 3️ Run Your App
+### 3 Run Your App
 ```
 dist\FAT12 Floppy Manager.exe
 ```
@@ -100,7 +100,7 @@ dist\FAT12 Floppy Manager.exe
 ## What's Included
 
 **Essential Files:**
-- `fat12_floppy_manager.py` - Main application (PyQt6)
+- `fat12_floppy_manager.py` - Main application (PySide6)
 - `fat12_handler.py` - FAT12 filesystem handler
 - `gui_components.py` - GUI dialogs and viewers
 - `vfat_utils.py` - VFAT/LFN utilities
