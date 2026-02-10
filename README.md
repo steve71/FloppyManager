@@ -66,6 +66,7 @@ dist\FAT12 Floppy Manager.exe
 - **Smart Truncation**: Automatically converts long filenames (e.g., `My_Favorite_Song.mid`) to the hardware-compliant 8.3 format (`MY_FAV~1.MID`) (Windows or no numeric tail option).
 - **VFAT Filename Displayed in Table** - Displays both long filenames and 8.3 short names as well as size and type
 - **Save floppy images** - save copies of floppy images
+- **Directory Support** - Create, rename, and delete folders; navigate subdirectories
 - **File Attributes** - View and edit file attributes (Read-only, Hidden, System, Archive)
 - **Add files** - Drag any files or add file(s) with "Add Files" button
 - **Rename files** - Windows-style inline editing (F2)

@@ -1444,6 +1444,7 @@ class FloppyManagerWindow(QMainWindow):
         <li>Writes directly to image (no mounting)</li>
         <li>Displays long filenames and 8.3 short names</li>
         <li>Save copies of floppy images</li>
+        <li>Directory support (Create/Delete/Navigate)</li>
         <li>Drag and drop support</li>
         <li>View and edit file attributes</li>
         </ul>
