@@ -1,34 +1,24 @@
 # Copyright (c) 2026 Stephen P Smith
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# MIT License
+
+import os
+import shutil
+import tempfile
+from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, 
     QTabWidget, QHeaderView, QPushButton, QLabel, QGridLayout,
-    QWidget, QScrollArea, QSizePolicy, QSpinBox, QFrame, QApplication
+    QWidget, QScrollArea, QSizePolicy, QSpinBox, QFrame, QApplication,
+    QTreeWidget, QTreeWidgetItem, QStyledItemDelegate, QLineEdit,
+    QRadioButton, QDialogButtonBox, QMessageBox
 )
-from PyQt6.QtCore import Qt, QSize, QTimer
-from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtCore import Qt, QSize, QTimer, QMimeData, QUrl
+from PyQt6.QtGui import QColor, QPalette, QDrag
 
 # Import the FAT12 handler
 from fat12_handler import FAT12Image
-from vfat_utils import parse_raw_lfn_entry, parse_raw_short_entry, get_raw_entry_chain
+from vfat_utils import parse_raw_lfn_entry, parse_raw_short_entry, get_raw_entry_chain, split_filename_for_editing
 
 class BootSectorViewer(QDialog):
     """Dialog to view boot sector information"""
@@ -78,6 +68,33 @@ class BootSectorViewer(QDialog):
         
         bpb_table.resizeColumnsToContents()
         tabs.addTab(bpb_table, "BIOS Parameter Block")
+        
+        # Extended BPB Table
+        # Only show if signature is 0x29 (Extended BPB present)
+        if hasattr(self.image, 'boot_signature') and self.image.boot_signature == 0x29:
+            ebpb_table = QTableWidget()
+            ebpb_table.setColumnCount(2)
+            ebpb_table.setHorizontalHeaderLabels(['Field', 'Value'])
+            ebpb_table.horizontalHeader().setStretchLastSection(True)
+            ebpb_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            ebpb_table.setAlternatingRowColors(True)
+            
+            ebpb_data = [
+                ('Drive Number', f'0x{self.image.drive_number:02X}'),
+                ('Reserved', f'0x{self.image.reserved_ebpb:02X}'),
+                ('Boot Signature', f'0x{self.image.boot_signature:02X} (Valid)'),
+                ('Volume ID', f'0x{self.image.volume_id:08X}'),
+                ('Volume Label', self.image.volume_label),
+                ('File System Type', self.image.fs_type_label),
+            ]
+            
+            ebpb_table.setRowCount(len(ebpb_data))
+            for i, (field, value) in enumerate(ebpb_data):
+                ebpb_table.setItem(i, 0, QTableWidgetItem(field))
+                ebpb_table.setItem(i, 1, QTableWidgetItem(value))
+            
+            ebpb_table.resizeColumnsToContents()
+            tabs.addTab(ebpb_table, "Extended BPB")
                 
         # Calculated Info Table
         vol_geom_table = QTableWidget()
@@ -121,9 +138,9 @@ class BootSectorViewer(QDialog):
         
         # Auto-resize to fit content
         self.adjustSize()
-        self.setMinimumSize(350, 470)
+        self.setMinimumSize(380, 470)
 
-class RootDirectoryViewer(QDialog):
+class DirectoryViewer(QDialog):
     """Dialog to view complete root directory information with detailed VFAT tooltips"""
     
     def __init__(self, image: FAT12Image, parent=None):
@@ -188,13 +205,13 @@ class RootDirectoryViewer(QDialog):
                 html += "<table class='short'>"
                 
                 # Row 1: Field names
-                html += "<tr><th>Filename</th><th>Attr</th><th>Res</th><th>Cr10ms</th>"
+                html += "<tr><th>Name</th><th>Attr</th><th>Res</th><th>Cr10ms</th>"
                 html += "<th>CrTime</th><th>CrDate</th><th>AccDate</th><th>ClusHi</th>"
                 html += "<th>ModTime</th><th>ModDate</th><th>ClusLo</th><th>Size</th></tr>"
                 
                 # Row 2: Values
                 html += f"<tr>"
-                html += f"<td>'{info['filename']}'</td>"
+                html += f"<td>'{info['name']}'</td>"
                 html += f"<td>0x{info['attr']:02X}<br>{info['attr_str']}</td>"
                 html += f"<td>0x{info['reserved']:02X}</td>"
                 html += f"<td>{info['creation_time_tenth']}</td>"
@@ -214,7 +231,7 @@ class RootDirectoryViewer(QDialog):
         
     def setup_ui(self):
         """Setup the viewer UI"""
-        self.setWindowTitle("Root Directory Information")
+        self.setWindowTitle("Directory Information")
         
         layout = QVBoxLayout(self)
         
@@ -235,8 +252,8 @@ class RootDirectoryViewer(QDialog):
         table.setColumnCount(12)
         table.setHorizontalHeaderLabels([
             'Index',
-            'Filename (Long)', 
-            'Filename (8.3)',
+            'Name (Long)', 
+            'Name (8.3)',
             'Size (bytes)',
             'Created Date/Time',
             'Last Accessed',
@@ -494,7 +511,7 @@ class FATViewer(QDialog):
         if is_dark:
             legend_items = [
                 ("Free (0x000)", QColor(45, 45, 45)),
-                ("Reserved (0x001)", QColor(60, 60, 120)),
+                ("Reserved (System)", QColor(60, 60, 120)),
                 ("Used (0x002-0xFF7)", QColor(60, 120, 60)),
                 ("Bad Cluster (0xFF7)", QColor(120, 60, 60)),
                 ("End of Chain (0xFF8-0xFFF)", QColor(180, 140, 0)),
@@ -503,7 +520,7 @@ class FATViewer(QDialog):
         else:
             legend_items = [
                 ("Free (0x000)", QColor(240, 240, 240)),
-                ("Reserved (0x001)", QColor(200, 200, 255)),
+                ("Reserved (System)", QColor(200, 200, 255)),
                 ("Used (0x002-0xFF7)", QColor(144, 238, 144)),
                 ("Bad Cluster (0xFF7)", QColor(255, 200, 200)),
                 ("End of Chain (0xFF8-0xFFF)", QColor(255, 215, 0)),
@@ -636,7 +653,18 @@ class FATViewer(QDialog):
                 
                 # Get FAT entry value
                 value = self.image.get_fat_entry(self.fat_data, cluster_num)
-                status = self.image.classify_cluster(value)
+                
+                # Special handling for reserved clusters 0 and 1
+                if cluster_num == 0:
+                    status = FAT12Image.CLUSTER_RESERVED
+                    text = "ID"
+                    tooltip = f"Cluster 0: Media Descriptor (0x{value:03X})"
+                elif cluster_num == 1:
+                    status = FAT12Image.CLUSTER_RESERVED
+                    text = "RES"
+                    tooltip = f"Cluster 1: Reserved (0x{value:03X})"
+                else:
+                    status = self.image.classify_cluster(value)
                 
                 # Create cell widget
                 cell = QLabel()
@@ -649,7 +677,10 @@ class FATViewer(QDialog):
                 cell.setCursor(Qt.CursorShape.PointingHandCursor)
                 
                 # Determine text based on value
-                if status == FAT12Image.CLUSTER_FREE:
+                if cluster_num <= 1:
+                    # Text and tooltip already set above for 0 and 1
+                    pass
+                elif status == FAT12Image.CLUSTER_FREE:
                     text = ""  # Empty for free clusters
                     tooltip = f"Cluster {cluster_num}: Free (0x000)"
                 elif status == FAT12Image.CLUSTER_RESERVED:
@@ -668,7 +699,9 @@ class FATViewer(QDialog):
                 
                 # Add filename to tooltip if this cluster belongs to a file
                 if cluster_num in self.cluster_to_file:
-                    tooltip += f"\nFile: {self.cluster_to_file[cluster_num]}"
+                    tooltip += f"\nName: {self.cluster_to_file[cluster_num]}"
+                elif status == FAT12Image.CLUSTER_USED or status == FAT12Image.CLUSTER_EOF:
+                    tooltip += "\nStatus: Orphaned / Unknown (Not linked in directory)"
                 
                 cell.setText(text)
                 cell.setToolTip(tooltip)
@@ -695,13 +728,16 @@ class FileAttributesDialog(QDialog):
         
     def setup_ui(self):
         """Setup the attributes editor UI"""
-        self.setWindowTitle(f"File Attributes - {self.entry['name']}")
+        is_dir = self.entry.get('is_dir', False)
+        type_label = "Folder" if is_dir else "File"
+        
+        self.setWindowTitle(f"{type_label} Attributes - {self.entry['name']}")
         self.setModal(True)
         
         layout = QVBoxLayout(self)
         
         # Info label
-        info_label = QLabel(f"<b>File:</b> {self.entry['name']}")
+        info_label = QLabel(f"<b>{type_label}:</b> {self.entry['name']}")
         layout.addWidget(info_label)
         
         # Add spacing
@@ -710,31 +746,31 @@ class FileAttributesDialog(QDialog):
         # Create checkboxes for each attribute
         from PyQt6.QtWidgets import QCheckBox, QGroupBox
         
-        attr_group = QGroupBox("File Attributes")
+        attr_group = QGroupBox(f"{type_label} Attributes")
         attr_layout = QVBoxLayout()
         
         # Read-only checkbox
         self.readonly_cb = QCheckBox("Read-only")
         self.readonly_cb.setChecked(self.entry['is_read_only'])
-        self.readonly_cb.setToolTip("Prevents the file from being modified or deleted")
+        self.readonly_cb.setToolTip(f"Prevents the {type_label.lower()} from being modified or deleted")
         attr_layout.addWidget(self.readonly_cb)
         
         # Hidden checkbox
         self.hidden_cb = QCheckBox("Hidden")
         self.hidden_cb.setChecked(self.entry['is_hidden'])
-        self.hidden_cb.setToolTip("Hides the file from normal directory listings")
+        self.hidden_cb.setToolTip(f"Hides the {type_label.lower()} from normal directory listings")
         attr_layout.addWidget(self.hidden_cb)
         
         # System checkbox
         self.system_cb = QCheckBox("System")
         self.system_cb.setChecked(self.entry['is_system'])
-        self.system_cb.setToolTip("Marks the file as a system file")
+        self.system_cb.setToolTip(f"Marks the {type_label.lower()} as a system item")
         attr_layout.addWidget(self.system_cb)
         
         # Archive checkbox
         self.archive_cb = QCheckBox("Archive")
         self.archive_cb.setChecked(self.entry['is_archive'])
-        self.archive_cb.setToolTip("Indicates the file has been modified since last backup")
+        self.archive_cb.setToolTip(f"Indicates the {type_label.lower()} has been modified since last backup")
         attr_layout.addWidget(self.archive_cb)
         
         attr_group.setLayout(attr_layout)
@@ -769,3 +805,237 @@ class FileAttributesDialog(QDialog):
             'is_system': self.system_cb.isChecked(),
             'is_archive': self.archive_cb.isChecked(),
         }
+
+class SortableTreeWidgetItem(QTreeWidgetItem):
+    """Tree item that sorts folders before files, then by column data."""
+    def __lt__(self, other):
+        # Get the full entry data, which is always stored in column 0
+        my_entry = self.data(0, Qt.ItemDataRole.UserRole)
+        other_entry = other.data(0, Qt.ItemDataRole.UserRole)
+
+        # Primary sort: folders vs files
+        if my_entry and other_entry:
+            my_is_dir = my_entry.get('is_dir', False)
+            other_is_dir = other_entry.get('is_dir', False)
+
+            if my_is_dir != other_is_dir:
+                # Directories are "less than" files, so they come first in ascending sort.
+                # my_is_dir is a bool (True for dir). True > False is True.
+                return my_is_dir > other_is_dir
+
+        # Secondary sort: by the selected column's data
+        column = self.treeWidget().sortColumn()
+        my_data = self.data(column, Qt.ItemDataRole.UserRole)
+        other_data = other.data(column, Qt.ItemDataRole.UserRole)
+        
+        if my_data is not None and other_data is not None:
+            # For column 0 (Filename), UserRole is the entry dict. Fall back to text sorting.
+            if isinstance(my_data, dict):
+                return super().__lt__(other)
+            # For other columns, UserRole is specific sort data (size, timestamp).
+            return my_data < other_data
+            
+        # Fallback to default text-based sorting for the column
+        return super().__lt__(other)
+
+class FileTreeWidget(QTreeWidget):
+    """Custom TreeWidget that supports dragging files out and dropping files in"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QTreeWidget.DragDropMode.DragDrop)
+        self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+    
+    def startDrag(self, supportedActions):
+        # Get main window reference to access image
+        main_window = self.window()
+        if not hasattr(main_window, 'image') or not main_window.image:
+            return
+
+        selected_items = self.selectedItems()
+        if not selected_items:
+            return
+
+        # Create a temporary directory
+        temp_dir = tempfile.mkdtemp(prefix="fat12_drag_")
+        
+        try:
+            urls = []
+            files_exported = False
+            
+            for item in selected_items:
+                entry = item.data(0, Qt.ItemDataRole.UserRole)
+                
+                if entry and not entry['is_dir']:
+                    try:
+                        data = main_window.image.extract_file(entry)
+                        filename = entry['name']
+                        filepath = os.path.join(temp_dir, filename)
+                        
+                        with open(filepath, 'wb') as f:
+                            f.write(data)
+                        
+                        urls.append(QUrl.fromLocalFile(filepath))
+                        files_exported = True
+                    except Exception as e:
+                        print(f"Error extracting {entry['name']} for drag: {e}")
+            
+            if not files_exported:
+                return
+
+            drag = QDrag(self)
+            mime_data = QMimeData()
+            mime_data.setUrls(urls)
+            mime_data.setData("application/x-fat12-item", b"1")
+            drag.setMimeData(mime_data)
+            
+            # Execute drag - blocks until drop is finished
+            drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction)
+            
+        finally:
+            # Cleanup temp dir after drag is done
+            try:
+                shutil.rmtree(temp_dir)
+            except:
+                pass
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            main_window = self.window()
+            
+            if not hasattr(main_window, 'image') or not main_window.image:
+                QMessageBox.information(
+                    self,
+                    "No Image Loaded",
+                    "Please create a new image or open an existing one first."
+                )
+                event.ignore()
+                return
+
+            files = []
+            for url in event.mimeData().urls():
+                filepath = url.toLocalFile()
+                if filepath and Path(filepath).is_file():
+                    files.append(filepath)
+            
+            if files:
+                # Check for internal drag
+                is_internal = event.mimeData().hasFormat("application/x-fat12-item")
+                
+                # Determine target directory
+                target_item = self.itemAt(event.position().toPoint())
+                parent_cluster = None
+                
+                if target_item:
+                    entry = target_item.data(0, Qt.ItemDataRole.UserRole)
+                    if entry:
+                        if entry['is_dir']:
+                            parent_cluster = entry['cluster']
+                        else:
+                            parent_cluster = entry.get('parent_cluster')
+                            if parent_cluster == 0: parent_cluster = None
+                
+                entries_to_delete = []
+                if is_internal:
+                    # Check if moving to same folder
+                    source_items = self.selectedItems()
+                    if source_items:
+                        first_entry = source_items[0].data(0, Qt.ItemDataRole.UserRole)
+                        source_parent = first_entry.get('parent_cluster')
+                        if source_parent == 0: source_parent = None
+                        
+                        if source_parent == parent_cluster:
+                            event.ignore()
+                            return
+                        
+                        entries_to_delete = [item.data(0, Qt.ItemDataRole.UserRole) for item in source_items]
+                    
+                    event.setDropAction(Qt.DropAction.MoveAction)
+                else:
+                    event.setDropAction(Qt.DropAction.CopyAction)
+
+                event.accept()
+                
+                success_count = main_window.add_files_from_list(files, parent_cluster)
+
+                # Handle Move (Delete source) if internal and copy was successful
+                if is_internal and success_count == len(files):
+                    deleted_count = 0
+                    for entry in entries_to_delete:
+                        if main_window.image.delete_file(entry):
+                            deleted_count += 1
+                    
+                    main_window.refresh_file_list()
+                    main_window.status_bar.showMessage(f"Moved {deleted_count} file(s)")
+        else:
+            super().dropEvent(event)
+
+class RenameDelegate(QStyledItemDelegate):
+    """Custom delegate that selects only filename (not extension) when editing starts"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.should_customize_selection = False
+    
+    def createEditor(self, parent, option, index):
+        """Create editor and customize selection if requested"""
+        editor = super().createEditor(parent, option, index)
+        if isinstance(editor, QLineEdit) and self.should_customize_selection:
+            # Only customize if we explicitly requested it
+            QTimer.singleShot(0, lambda: self.customize_selection(editor, index))
+            self.should_customize_selection = False  # Reset flag
+        return editor
+    
+    def customize_selection(self, editor, index):
+        """Customize the text selection to exclude extension"""
+        if editor and editor.isVisible():
+            text = index.data()
+            if text:
+                full_name, start, end = split_filename_for_editing(text)
+                editor.setFocus()
+                editor.setSelection(start, end - start)
+
+class FormatDialog(QDialog):
+    """Dialog for selecting format options with explanations"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Format Options")
+        self.full_format = False
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        
+        lbl = QLabel("Select format type:")
+        layout.addWidget(lbl)
+        
+        self.rb_quick = QRadioButton("Quick Format")
+        self.rb_quick.setToolTip("Resets the filesystem (FAT and Root Directory).\nAll files and subdirectories are removed from the listing, but their data remains on disk until overwritten.")
+        self.rb_quick.setChecked(True)
+        layout.addWidget(self.rb_quick)
+        
+        self.rb_full = QRadioButton("Full Format")
+        self.rb_full.setToolTip("Resets the filesystem and overwrites all data sectors with zeros.\nAll files, subdirectories, and data are permanently erased.")
+        layout.addWidget(self.rb_full)
+        
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+        
+    def accept(self):
+        self.full_format = self.rb_full.isChecked()
+        super().accept()

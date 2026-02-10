@@ -1,7 +1,7 @@
 import pytest
 import datetime
 import struct
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
 from fat12_handler import FAT12Image
 from vfat_utils import decode_fat_date, decode_fat_time, calculate_lfn_checksum
 
@@ -470,7 +470,7 @@ class TestDirectoryOperations:
         entries = handler.read_root_directory()
         
         # Mock generate_83_name to return a non-ascii string to trigger UnicodeEncodeError
-        with patch('fat12_handler.generate_83_name', return_value="FÏLE    TXT"):
+        with patch('fat12_directory.generate_83_name', return_value="FÏLE    TXT"):
             handler.rename_file(entries[0], "new.txt")
             
         entries = handler.read_root_directory()

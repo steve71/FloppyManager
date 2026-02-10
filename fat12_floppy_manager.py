@@ -1,24 +1,7 @@
 #!/usr/bin/env python3
 
 # Copyright (c) 2026 Stephen P Smith
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# MIT License
 
 """
 FAT12 Floppy Disk Image Manager
@@ -34,198 +17,25 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
-from vfat_utils import format_83_name, split_filename_for_editing, decode_fat_datetime
+from vfat_utils import format_83_name, decode_fat_datetime
 
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTableWidget, QTableWidgetItem, QFileDialog,
-    QMessageBox, QLabel, QStatusBar, QMenuBar, QMenu, QHeaderView,
-    QDialog, QTabWidget, QToolBar, QStyle, QSizePolicy, QInputDialog,
-    QRadioButton, QDialogButtonBox
+    QTreeWidget, QFileDialog, QMessageBox, QLabel, QStatusBar, QMenu,
+    QDialog, QToolBar, QStyle, QInputDialog, QHeaderView
 )
-from PyQt6.QtCore import Qt, QSettings, QTimer, QSize, QMimeData, QUrl
-from PyQt6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, QColor, QDrag
+from PyQt6.QtCore import Qt, QSettings, QTimer, QSize
+from PyQt6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, QColor
 
 # Import the FAT12 handler
 from fat12_handler import FAT12Image
-from gui_components import BootSectorViewer, RootDirectoryViewer, FATViewer, FileAttributesDialog
+from gui_components import (
+    BootSectorViewer, DirectoryViewer, FATViewer, FileAttributesDialog,
+    SortableTreeWidgetItem, FileTreeWidget, RenameDelegate, FormatDialog
+)
 
-from PyQt6.QtWidgets import QStyledItemDelegate, QLineEdit
-
-class SortableTableWidgetItem(QTableWidgetItem):
-    """Table item that sorts based on UserRole data if available, otherwise text"""
-    def __lt__(self, other):
-        # Get sort data
-        my_data = self.data(Qt.ItemDataRole.UserRole)
-        other_data = other.data(Qt.ItemDataRole.UserRole)
-        
-        if my_data is not None and other_data is not None:
-            return my_data < other_data
-            
-        return super().__lt__(other)
-
-class FileTableWidget(QTableWidget):
-    """Custom TableWidget that supports dragging files out and dropping files in"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setDragEnabled(True)
-        self.setAcceptDrops(True)
-        self.setDragDropMode(QTableWidget.DragDropMode.DragDrop)
-    
-    def startDrag(self, supportedActions):
-        # Get main window reference to access image
-        main_window = self.window()
-        if not hasattr(main_window, 'image') or not main_window.image:
-            return
-
-        selected_rows = set(item.row() for item in self.selectedItems())
-        if not selected_rows:
-            return
-
-        # Create a temporary directory
-        temp_dir = tempfile.mkdtemp(prefix="fat12_drag_")
-        
-        try:
-            urls = []
-            entries = main_window.image.read_root_directory()
-            
-            files_exported = False
-            
-            for row in selected_rows:
-                # Get index from hidden column 5
-                index_item = self.item(row, 6)
-                if not index_item:
-                    continue
-                    
-                entry_index = int(index_item.text())
-                entry = next((e for e in entries if e['index'] == entry_index), None)
-                
-                if entry and not entry['is_dir']:
-                    try:
-                        data = main_window.image.extract_file(entry)
-                        filename = entry['name']
-                        filepath = os.path.join(temp_dir, filename)
-                        
-                        with open(filepath, 'wb') as f:
-                            f.write(data)
-                        
-                        urls.append(QUrl.fromLocalFile(filepath))
-                        files_exported = True
-                    except Exception as e:
-                        print(f"Error extracting {entry['name']} for drag: {e}")
-            
-            if not files_exported:
-                return
-
-            drag = QDrag(self)
-            mime_data = QMimeData()
-            mime_data.setUrls(urls)
-            drag.setMimeData(mime_data)
-            
-            # Execute drag - blocks until drop is finished
-            drag.exec(Qt.DropAction.CopyAction)
-            
-        finally:
-            # Cleanup temp dir after drag is done
-            try:
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragMoveEvent(event)
-
-    def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            main_window = self.window()
-            
-            if not hasattr(main_window, 'image') or not main_window.image:
-                QMessageBox.information(
-                    self,
-                    "No Image Loaded",
-                    "Please create a new image or open an existing one first."
-                )
-                event.ignore()
-                return
-
-            files = []
-            for url in event.mimeData().urls():
-                filepath = url.toLocalFile()
-                if filepath and Path(filepath).is_file():
-                    files.append(filepath)
-            
-            if files:
-                event.acceptProposedAction()
-                main_window.add_files_from_list(files)
-        else:
-            super().dropEvent(event)
-
-class RenameDelegate(QStyledItemDelegate):
-    """Custom delegate that selects only filename (not extension) when editing starts"""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.should_customize_selection = False
-    
-    def createEditor(self, parent, option, index):
-        """Create editor and customize selection if requested"""
-        editor = super().createEditor(parent, option, index)
-        if isinstance(editor, QLineEdit) and self.should_customize_selection:
-            # Only customize if we explicitly requested it
-            QTimer.singleShot(0, lambda: self.customize_selection(editor, index))
-            self.should_customize_selection = False  # Reset flag
-        return editor
-    
-    def customize_selection(self, editor, index):
-        """Customize the text selection to exclude extension"""
-        if editor and editor.isVisible():
-            text = index.data()
-            if text:
-                full_name, start, end = split_filename_for_editing(text)
-                editor.setFocus()
-                editor.setSelection(start, end - start)
-
-class FormatDialog(QDialog):
-    """Dialog for selecting format options with explanations"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Format Options")
-        self.full_format = False
-        self.setup_ui()
-
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-        
-        lbl = QLabel("Select format type:")
-        layout.addWidget(lbl)
-        
-        self.rb_quick = QRadioButton("Quick Format")
-        self.rb_quick.setToolTip("Clears the File Allocation Table (FAT) and Root Directory.\nData remains on disk but is marked as free by clearing the FAT.")
-        self.rb_quick.setChecked(True)
-        layout.addWidget(self.rb_quick)
-        
-        self.rb_full = QRadioButton("Full Format")
-        self.rb_full.setToolTip("Clears File Allocation Table (FAT), Root Directory, and overwrites all data sectors with zeros.\nEnsures all data is permanently erased.")
-        layout.addWidget(self.rb_full)
-        
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btns.accepted.connect(self.accept)
-        btns.rejected.connect(self.reject)
-        layout.addWidget(btns)
-        
-    def accept(self):
-        self.full_format = self.rb_full.isChecked()
-        super().accept()
+from PyQt6.QtWidgets import QLineEdit
 
 class FloppyManagerWindow(QMainWindow):
     """Main window for the floppy manager"""
@@ -244,6 +54,10 @@ class FloppyManagerWindow(QMainWindow):
         self.setup_ui()
 
         self.restore_settings()
+
+        # Set a default sort order on startup, overriding any restored state.
+        # This ensures a consistent, predictable initial view (A-Z).
+        self.table.header().setSortIndicator(0, Qt.SortOrder.AscendingOrder)
 
         self.image_path = image_path
         self.image = None
@@ -315,21 +129,16 @@ class FloppyManagerWindow(QMainWindow):
         search_layout.addWidget(self.search_input)
         layout.addLayout(search_layout)
 
-        # File table - now with 7 columns
-        self.table = FileTableWidget()
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(['Filename', 'Short Name (8.3)', 'Date Modified', 'Type', 'Size', 'Attr', 'Index'])
+        # File Tree
+        self.table = FileTreeWidget()
+        self.table.setColumnCount(6)
+        self.table.setHeaderLabels(['Filename', 'Short Name (8.3)', 'Date Modified', 'Type', 'Size', 'Attr'])
 
-        # Hide the index column (used internally)
-        self.table.setColumnHidden(6, True)
-
-        # Configure table
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
+        # Configure tree
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)
         # Disable all automatic edit triggers - we'll handle this manually
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setEditTriggers(QTreeWidget.EditTrigger.NoEditTriggers)
 
         # Track editing state
         self._editing_in_progress = False
@@ -342,15 +151,12 @@ class FloppyManagerWindow(QMainWindow):
         # Reset click tracking when selection changes
         self.table.itemSelectionChanged.connect(self.on_selection_changed)
 
-        # Set column widths
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Filename
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Short name
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Date Modified
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Type
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Size
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)             # Attr
-        self.table.setColumnWidth(5, 50)
+        # Set column resizing behavior
+        header = self.table.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for i in range(1, 6):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
 
         # Handle clicks for rename and extract
         self.table.clicked.connect(self.on_table_clicked)
@@ -409,6 +215,12 @@ class FloppyManagerWindow(QMainWindow):
         
         # === FILE MANAGEMENT GROUP ===
         
+        # New Folder
+        new_folder_action = QAction(self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon), "New Folder", self)
+        new_folder_action.setStatusTip("Create a new folder")
+        new_folder_action.triggered.connect(self.create_new_folder)
+        toolbar.addAction(new_folder_action)
+        
         # Add Files
         add_action = QAction(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton), "Add", self)
         add_action.setStatusTip("Add files to the floppy image")
@@ -443,7 +255,7 @@ class FloppyManagerWindow(QMainWindow):
         
         # Delete Selected
         delete_action = QAction(self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon), "Delete", self)
-        delete_action.setStatusTip("Delete selected files (Del key)")
+        delete_action.setStatusTip("Delete selected items (Del key)")
         delete_action.triggered.connect(self.delete_selected)
         toolbar.addAction(delete_action)
 
@@ -468,14 +280,22 @@ class FloppyManagerWindow(QMainWindow):
         if not self.image:
             return
 
-        selected_rows = set(item.row() for item in self.table.selectedItems())
-        if not selected_rows:
-            return
+        selected_items = self.table.selectedItems()
 
         menu = QMenu()
         
+        new_folder_action = QAction("New Folder", self)
+        new_folder_action.triggered.connect(self.create_new_folder)
+        menu.addAction(new_folder_action)
+        
+        menu.addSeparator()
+        
+        if not selected_items:
+            menu.exec(self.table.viewport().mapToGlobal(position))
+            return
+        
         # Only show rename and properties if exactly one file is selected
-        if len(selected_rows) == 1:
+        if len(selected_items) == 1:
             rename_action = QAction("Rename", self)
             rename_action.setShortcut(Qt.Key.Key_F2)
             rename_action.triggered.connect(self.start_rename)
@@ -565,8 +385,8 @@ class FloppyManagerWindow(QMainWindow):
         boot_sector_action.triggered.connect(self.show_boot_sector_info)
         view_menu.addAction(boot_sector_action)
 
-        root_dir_action = QAction("&Root Directory Information...", self)
-        root_dir_action.setToolTip("View complete root directory details")
+        root_dir_action = QAction("&Directory Information...", self)
+        root_dir_action.setToolTip("View complete directory details")
         root_dir_action.triggered.connect(self.show_root_directory_info)
         view_menu.addAction(root_dir_action)
 
@@ -890,7 +710,7 @@ class FloppyManagerWindow(QMainWindow):
             self.edit_file_attributes()
         else:
             # Call the original keyPressEvent
-            QTableWidget.keyPressEvent(self.table, event)
+            QTreeWidget.keyPressEvent(self.table, event)
 
     def load_image(self, filepath: str):
         """Load a floppy disk image"""
@@ -918,82 +738,78 @@ class FloppyManagerWindow(QMainWindow):
         """Refresh the file list from the image"""
         # Block signals to prevent itemChanged from firing during population
         self.table.blockSignals(True)
+        self.table.setSortingEnabled(False)
         try:
-            self.table.setRowCount(0)
+            self.table.clear()
 
             if not self.image:
                 self.info_label.setText("")
                 return
 
             try:
-                entries = self.image.read_root_directory()
-
                 # Get search text
                 search_text = self.search_input.text().lower().strip() if hasattr(self, 'search_input') else ""
                 
-                total_files_count = 0
-
-                for entry in entries:
-                    # Filter hidden files if not enabled
-                    if not self.show_hidden_files and entry['is_hidden']:
-                        continue
-
-                    if not entry['is_dir']:
-                        total_files_count += 1
+                def add_items(parent_item, cluster):
+                    entries = self.image.read_directory(cluster)
+                    count = 0
+                    for entry in entries:
+                        if entry['name'] in ('.', '..'): continue
                         
-                        # Apply search filter (filename only)
-                        if search_text and (search_text not in entry['name'].lower() and 
-                                          search_text not in entry['short_name'].lower()):
+                        if not self.show_hidden_files and entry['is_hidden']:
                             continue
 
-                        row = self.table.rowCount()
-                        self.table.insertRow(row)
+                        # Apply search filter (files only)
+                        if not entry['is_dir'] and search_text:
+                            if (search_text not in entry['name'].lower() and 
+                                search_text not in entry['short_name'].lower()):
+                                continue
 
-                        # Filename (long name) - EDITABLE
-                        filename_item = QTableWidgetItem(entry['name'])
-                        filename_item.setFlags(filename_item.flags() | Qt.ItemFlag.ItemIsEditable)
-                        self.table.setItem(row, 0, filename_item)
+                        # Create item
+                        if parent_item:
+                            item = SortableTreeWidgetItem(parent_item)
+                        else:
+                            item = SortableTreeWidgetItem(self.table)
+                        
+                        # Store entry data
+                        item.setData(0, Qt.ItemDataRole.UserRole, entry)
 
-                        # Short name (8.3) - READ ONLY
-                        short_name_item = QTableWidgetItem(entry['short_name'])
-                        short_name_item.setFlags(short_name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                        self.table.setItem(row, 1, short_name_item)
+                        # Filename (0)
+                        item.setText(0, entry['name'])
+                        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+                        
+                        # Short Name (1)
+                        item.setText(1, entry['short_name'])
 
-                        # Date Modified - READ ONLY
+                        # Date Modified (2)
                         date_int = entry['last_modified_date']
                         time_int = entry['last_modified_time']
-                        
                         dt = decode_fat_datetime(date_int, time_int)
-                        
                         if dt:
-                            # Format: 10/25/2023 02:30 PM
                             date_str = dt.strftime("%m/%d/%Y %I:%M %p")
                             sort_key = int(dt.timestamp())
                         else:
                             date_str = ""
                             sort_key = -1
                             
-                        date_item = SortableTableWidgetItem(date_str)
-                        date_item.setData(Qt.ItemDataRole.UserRole, sort_key) # Sort by timestamp
-                        date_item.setFlags(date_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                        self.table.setItem(row, 2, date_item)
+                        item.setText(2, date_str)
+                        item.setData(2, Qt.ItemDataRole.UserRole, sort_key)
 
-                        # Type - READ ONLY
-                        type_item = QTableWidgetItem(entry['file_type'])
-                        type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                        self.table.setItem(row, 3, type_item)
+                        # Type (3)
+                        item.setText(3, entry['file_type'])
+                        item.setTextAlignment(3, Qt.AlignmentFlag.AlignCenter)
 
-                        # Size - READ ONLY
-                        size_str = f"{entry['size']:,} bytes"
-                        size_item = SortableTableWidgetItem(size_str)
-                        size_item.setData(Qt.ItemDataRole.UserRole, entry['size']) # Sort by actual size
-                        size_item.setFlags(size_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                        self.table.setItem(row, 4, size_item)
+                        # Size (4)
+                        if entry['is_dir']:
+                            item.setText(4, "")
+                            item.setData(4, Qt.ItemDataRole.UserRole, -1)
+                        else:
+                            item.setText(4, f"{entry['size']:,} bytes")
+                            item.setData(4, Qt.ItemDataRole.UserRole, entry['size'])
 
-                        # Attr - READ ONLY
+                        # Attr (5)
                         attr_str = ""
                         tooltip_parts = []
-
                         if entry['is_read_only']:
                             attr_str += "R"
                             tooltip_parts.append("Read-only")
@@ -1006,30 +822,29 @@ class FloppyManagerWindow(QMainWindow):
                         if entry['is_archive']:
                             attr_str += "A"
                             tooltip_parts.append("Archive")
-
-                        attr_item = QTableWidgetItem(attr_str)
+                        
+                        item.setText(5, attr_str)
                         if tooltip_parts:
-                            attr_item.setToolTip(", ".join(tooltip_parts))
-                        attr_item.setFlags(attr_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                        attr_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                        self.table.setItem(row, 5, attr_item)
+                            item.setToolTip(5, ", ".join(tooltip_parts))
+                        item.setTextAlignment(5, Qt.AlignmentFlag.AlignCenter)
 
-                        # Index (hidden) - READ ONLY
-                        index_item = QTableWidgetItem(str(entry['index']))
-                        index_item.setFlags(index_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                        self.table.setItem(row, 6, index_item)
+                        # Icon & Recursion
+                        if entry['is_dir']:
+                            item.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
+                            add_items(item, entry['cluster'])
+                        else:
+                            item.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
+                            count += 1
+                    return count
 
-                # Update info
-                visible_count = self.table.rowCount()
-                if search_text:
-                    self.info_label.setText(f"Showing {visible_count} of {total_files_count} files | {self.image.get_free_space():,} bytes free")
-                else:
-                    self.info_label.setText(f"{visible_count} files | {self.image.get_free_space():,} bytes free")
-                self.status_bar.showMessage(f"Loaded {visible_count} files")
+                file_count = add_items(None, None)
+                self.info_label.setText(f"{file_count} files | {self.image.get_free_space():,} bytes free")
+                self.status_bar.showMessage(f"Loaded {file_count} files")
 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to read directory: {e}")
         finally:
+            self.table.setSortingEnabled(True)
             self.table.blockSignals(False)
 
     def show_boot_sector_info(self):
@@ -1055,7 +870,7 @@ class FloppyManagerWindow(QMainWindow):
             )
             return
         
-        viewer = RootDirectoryViewer(self.image, self)
+        viewer = DirectoryViewer(self.image, self)
         viewer.exec()
 
     def show_fat_viewer(self):
@@ -1091,12 +906,25 @@ class FloppyManagerWindow(QMainWindow):
         if not filenames:
             return
 
-        self.add_files_from_list(filenames)
+        # Determine parent cluster from selection
+        parent_cluster = None
+        selected_items = self.table.selectedItems()
+        if selected_items:
+            item = selected_items[0]
+            entry = item.data(0, Qt.ItemDataRole.UserRole)
+            if entry:
+                if entry['is_dir']:
+                    parent_cluster = entry['cluster']
+                else:
+                    parent_cluster = entry.get('parent_cluster')
+                    if parent_cluster == 0: parent_cluster = None
 
-    def add_files_from_list(self, filenames: list):
+        self.add_files_from_list(filenames, parent_cluster)
+
+    def add_files_from_list(self, filenames: list, parent_cluster: int = None):
         """Add files from a list of file paths (used by both dialog and drag-drop)"""
         if not self.image:
-            return
+            return 0
 
         # Sort files by name (case-insensitive) to ensure deterministic order
         filenames.sort(key=lambda x: Path(x).name.lower())
@@ -1120,13 +948,21 @@ class FloppyManagerWindow(QMainWindow):
                     modification_dt = None
 
                 # Predict the 8.3 name that will be used
-                short_name_83 = self.image.predict_short_name(original_name, self.use_numeric_tail)
+                short_name_83 = self.image.predict_short_name(original_name, self.use_numeric_tail, parent_cluster)
                 
                 # Format 8.3 name for display (add dot back)
                 short_display = format_83_name(short_name_83)
 
                 # Check if file already exists
-                collision_entry = self.image.find_entry_by_83_name(short_name_83)
+                # Check in the specific directory
+                entries = self.image.read_directory(parent_cluster)
+                
+                # Check for LFN collision (case-insensitive) first
+                collision_entry = next((e for e in entries if e['name'].lower() == original_name.lower()), None)
+
+                if not collision_entry:
+                    # Check for Short Name collision if no LFN collision found
+                    collision_entry = next((e for e in entries if e['short_name'].upper() == short_name_83), None)
 
                 if collision_entry:
                     if self.confirm_replace:
@@ -1148,7 +984,7 @@ class FloppyManagerWindow(QMainWindow):
                     self.image.delete_file(collision_entry)
 
                 # Write the new file
-                if self.image.write_file_to_image(original_name, data, self.use_numeric_tail, modification_dt):
+                if self.image.write_file_to_image(original_name, data, self.use_numeric_tail, modification_dt, parent_cluster):
                     success_count += 1
                 else:
                     fail_count += 1
@@ -1168,6 +1004,60 @@ class FloppyManagerWindow(QMainWindow):
             self.status_bar.showMessage(f"Added {success_count} file(s)")
         if fail_count > 0:
             QMessageBox.warning(self, "Warning", f"Failed to add {fail_count} file(s)")
+            
+        return success_count
+
+    def create_new_folder(self):
+        """Create a new directory"""
+        if not self.image:
+            QMessageBox.information(self, "No Image", "Please create a new image or open an existing one first.")
+            return
+
+        # Determine parent cluster based on selection
+        parent_cluster = None
+        selected_items = self.table.selectedItems()
+        
+        if selected_items:
+            item = selected_items[0]
+            entry = item.data(0, Qt.ItemDataRole.UserRole)
+            if entry:
+                if entry['is_dir']:
+                    parent_cluster = entry['cluster']
+                else:
+                    parent_cluster = entry.get('parent_cluster')
+                    # Convert 0 to None for root if necessary
+                    if parent_cluster == 0:
+                        parent_cluster = None
+        
+        # Ask for folder name
+        name, ok = QInputDialog.getText(self, "New Folder", "Folder Name:")
+        if ok:
+            name = name.strip()
+            if not name:
+                QMessageBox.warning(self, "Invalid Name", "Folder name cannot be empty.")
+                return
+
+            invalid_chars = '<>:"/\\|?*'
+            if any(c in name for c in invalid_chars):
+                QMessageBox.warning(self, "Invalid Name", f"Folder name cannot contain characters: {invalid_chars}")
+                return
+
+        if ok:
+            name = name.strip()
+            if not name:
+                QMessageBox.warning(self, "Invalid Name", "Folder name cannot be empty.")
+                return
+
+            invalid_chars = '<>:"/\\|?*'
+            if any(c in name for c in invalid_chars):
+                QMessageBox.warning(self, "Invalid Name", f"Folder name cannot contain characters: {invalid_chars}")
+                return
+
+            if self.image.create_directory(name, parent_cluster, self.use_numeric_tail):
+                self.refresh_file_list()
+                self.status_bar.showMessage(f"Created folder: {name}")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to create directory.\nDisk may be full or name invalid.")
 
     def extract_selected(self):
         """Extract selected files"""
@@ -1175,9 +1065,8 @@ class FloppyManagerWindow(QMainWindow):
             QMessageBox.information(self, "No Image Loaded", "No image loaded.")
             return
 
-        selected_rows = set(item.row() for item in self.table.selectedItems())
-
-        if not selected_rows:
+        selected_items = self.table.selectedItems()
+        if not selected_items:
             QMessageBox.information(self, "Info", "Please select files to extract")
             return
 
@@ -1185,12 +1074,10 @@ class FloppyManagerWindow(QMainWindow):
         if not save_dir:
             return
 
-        entries = self.image.read_root_directory()
         success_count = 0
 
-        for row in selected_rows:
-            entry_index = int(self.table.item(row, 6).text())
-            entry = next((e for e in entries if e['index'] == entry_index), None)
+        for item in selected_items:
+            entry = item.data(0, Qt.ItemDataRole.UserRole)
 
             if entry:
                 try:
@@ -1291,47 +1178,44 @@ class FloppyManagerWindow(QMainWindow):
              QMessageBox.critical(self, "Error", f"Failed to create ZIP file: {e}")
 
     def delete_selected(self):
-        """Delete selected files"""
+        """Delete selected items"""
         if not self.image:
             QMessageBox.information(self, "No Image Loaded", "No image loaded.")
             return
 
-        selected_rows = set(item.row() for item in self.table.selectedItems())
-
-        if not selected_rows:
-            QMessageBox.information(self, "Info", "Please select files to delete")
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            QMessageBox.information(self, "Info", "Please select items to delete")
             return
 
         if self.confirm_delete:
             response = QMessageBox.question(
                 self,
                 "Confirm Delete",
-                f"Delete {len(selected_rows)} file(s) from the disk image?",
+                f"Delete {len(selected_items)} item(s) from the disk image?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
 
             if response == QMessageBox.StandardButton.No:
                 return
 
-        entries = self.image.read_root_directory()
         success_count = 0
-        files_to_delete = []
-        read_only_files = []
+        items_to_delete = []
+        read_only_items = []
 
-        for row in selected_rows:
-            entry_index = int(self.table.item(row, 6).text())
-            entry = next((e for e in entries if e['index'] == entry_index), None)
+        for item in selected_items:
+            entry = item.data(0, Qt.ItemDataRole.UserRole)
             if entry:
-                files_to_delete.append(entry)
+                items_to_delete.append(entry)
                 if entry['is_read_only']:
-                    read_only_files.append(entry)
+                    read_only_items.append(entry)
 
-        # Warn about read-only files
-        if read_only_files:
-            msg = f"{len(read_only_files)} of the selected files are Read-Only.\n\nDo you want to delete them anyway?"
+        # Warn about read-only items
+        if read_only_items:
+            msg = f"{len(read_only_items)} of the selected items are Read-Only.\n\nDo you want to delete them anyway?"
             response = QMessageBox.warning(
                 self,
-                "Read-Only Files",
+                "Read-Only Items",
                 msg,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
@@ -1339,7 +1223,13 @@ class FloppyManagerWindow(QMainWindow):
                 return
 
         # Proceed with deletion
-        for entry in files_to_delete:
+        for entry in items_to_delete:
+            if entry.get('is_dir'):
+                if self.image.delete_directory(entry, recursive=True):
+                    success_count += 1
+                else:
+                    QMessageBox.critical(self, "Error", f"Failed to delete directory {entry['name']}")
+            else:
                 if self.image.delete_file(entry):
                     success_count += 1
                 else:
@@ -1348,7 +1238,7 @@ class FloppyManagerWindow(QMainWindow):
         self.refresh_file_list()
 
         if success_count > 0:
-            self.status_bar.showMessage(f"Deleted {success_count} file(s)")
+            self.status_bar.showMessage(f"Deleted {success_count} item(s)")
 
     def delete_all(self):
         """Delete all files"""
@@ -1650,7 +1540,16 @@ class FloppyManagerWindow(QMainWindow):
         self._last_click_row = -1
         self._last_click_col = -1
         
-        # Extract the file
+        # Check if item is a directory
+        item = self.table.itemFromIndex(index)
+        if item:
+            entry = item.data(0, Qt.ItemDataRole.UserRole)
+            if entry and entry.get('is_dir'):
+                # It's a directory - let the tree widget handle expansion/collapse (default behavior)
+                # We do NOT want to extract a directory as a binary file
+                return
+
+        # If it's a file, extract it
         self.extract_selected()
 
     def start_rename(self):
@@ -1664,8 +1563,8 @@ class FloppyManagerWindow(QMainWindow):
         self._last_click_col = -1
         
         # Get selected row
-        selected_rows = set(item.row() for item in self.table.selectedItems())
-        if len(selected_rows) != 1:
+        selected_items = self.table.selectedItems()
+        if len(selected_items) != 1:
             QMessageBox.information(
                 self,
                 "Select One File",
@@ -1673,20 +1572,20 @@ class FloppyManagerWindow(QMainWindow):
             )
             return
         
-        row = list(selected_rows)[0]
+        item = selected_items[0]
         
         # Make sure we're on the filename column
-        self.table.setCurrentCell(row, 0)
+        self.table.setCurrentItem(item, 0)
         
         # Tell the delegate to customize selection
         self.rename_delegate.should_customize_selection = True
         
         # Temporarily enable editing, start edit, then disable again
-        self.table.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
-        self.table.edit(self.table.currentIndex())
+        self.table.setEditTriggers(QTreeWidget.EditTrigger.AllEditTriggers)
+        self.table.editItem(item, 0)
         
         # Disable editing triggers after a moment (after editor is created)
-        QTimer.singleShot(100, lambda: self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers))
+        QTimer.singleShot(100, lambda: self.table.setEditTriggers(QTreeWidget.EditTrigger.NoEditTriggers))
     
     def edit_file_attributes(self):
         """Open the file attributes editor dialog"""
@@ -1694,24 +1593,20 @@ class FloppyManagerWindow(QMainWindow):
             return
         
         # Get selected row
-        selected_rows = set(item.row() for item in self.table.selectedItems())
-        if len(selected_rows) != 1:
+        selected_items = self.table.selectedItems()
+        if len(selected_items) != 1:
             QMessageBox.information(
                 self,
-                "Select One File",
-                "Please select exactly one file to edit attributes."
+                "Select One Item",
+                "Please select exactly one item to edit attributes."
             )
             return
         
-        row = list(selected_rows)[0]
-        
-        # Get the file entry from the hidden index column
-        index = int(self.table.item(row, 6).text())
-        entries = self.image.read_root_directory()
-        entry = next((e for e in entries if e['index'] == index), None)
+        item = selected_items[0]
+        entry = item.data(0, Qt.ItemDataRole.UserRole)
         
         if not entry:
-            QMessageBox.warning(self, "Error", "Could not find file entry.")
+            QMessageBox.warning(self, "Error", "Could not find entry.")
             return
         
         # Show the attributes dialog
@@ -1739,13 +1634,13 @@ class FloppyManagerWindow(QMainWindow):
                     f"Failed to update attributes for {entry['name']}"
                 )
     
-    def on_item_changed(self, item):
+    def on_item_changed(self, item, column):
         """Handle item changes (when rename is completed)"""
         if self._editing_in_progress:
             return
         
         # Only process changes to the filename column (column 0)
-        if item.column() != 0:
+        if column != 0:
             return
         
         self._editing_in_progress = True
@@ -1758,24 +1653,8 @@ class FloppyManagerWindow(QMainWindow):
         try:
             # Edit triggers are already NoEditTriggers - no need to set again
             
-            new_name = item.text().strip()
-            row = item.row()
-            
-            # Get the entry index from the hidden column
-            index_item = self.table.item(row, 6)
-            if not index_item:
-                self._editing_in_progress = False
-                return
-            
-            entry_index = int(index_item.text())
-            
-            # Get the entry from the image
-            entries = self.image.read_root_directory()
-            entry = None
-            for e in entries:
-                if e['index'] == entry_index:
-                    entry = e
-                    break
+            new_name = item.text(0).strip()
+            entry = item.data(0, Qt.ItemDataRole.UserRole)
             
             if not entry:
                 self._editing_in_progress = False
@@ -1788,7 +1667,7 @@ class FloppyManagerWindow(QMainWindow):
                 # User cancelled or didn't change anything
                 # Silently restore original name
                 self.table.itemChanged.disconnect(self.on_item_changed)
-                item.setText(old_name)
+                item.setText(0, old_name)
                 self.table.itemChanged.connect(self.on_item_changed)
                 self._editing_in_progress = False
                 return
@@ -1803,7 +1682,7 @@ class FloppyManagerWindow(QMainWindow):
                 )
                 # Temporarily disconnect to avoid recursion
                 self.table.itemChanged.disconnect(self.on_item_changed)
-                item.setText(old_name)
+                item.setText(0, old_name)
                 self.table.itemChanged.connect(self.on_item_changed)
                 self._editing_in_progress = False
                 return
@@ -1824,7 +1703,7 @@ class FloppyManagerWindow(QMainWindow):
                 )
                 # Temporarily disconnect to avoid recursion
                 self.table.itemChanged.disconnect(self.on_item_changed)
-                item.setText(old_name)
+                item.setText(0, old_name)
                 self.table.itemChanged.connect(self.on_item_changed)
         
         finally:
@@ -1835,7 +1714,6 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("FAT12 Floppy Manager")
     app.setOrganizationName("FAT12FloppyManager")
-
     # Set application style
     app.setStyle('Fusion')
 

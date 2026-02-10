@@ -254,7 +254,7 @@ class TestLFN:
 class TestRawEntryParsing:
     def test_parse_raw_short_entry(self):
         # Create a mock 32-byte short entry
-        # Filename: "TEST    TXT" (11 bytes)
+        # Name: "TEST    TXT" (11 bytes)
         # Attr: 0x20 (Archive)
         # Reserved: 0x00
         # Time/Date: Arbitrary valid values
@@ -267,7 +267,7 @@ class TestRawEntryParsing:
         
         info = parse_raw_short_entry(entry)
         
-        assert info['filename'] == "TEST    TXT"
+        assert info['name'] == "TEST    TXT"
         assert info['attr'] == 0x20
         assert "ARC" in info['attr_str']
         assert info['file_size'] == 1024

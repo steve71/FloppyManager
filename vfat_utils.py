@@ -1,22 +1,5 @@
 # Copyright (c) 2026 Stephen P Smith
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# MIT License
 
 import struct
 import datetime
@@ -342,7 +325,7 @@ def decode_raw_83_name(entry_data: bytes, errors: str = 'replace') -> str:
 def parse_raw_short_entry(entry_data: bytes) -> dict:
     """Parse a raw 32-byte short (8.3) entry into a dictionary of fields"""
     # Use decode_raw_83_name to handle 0x05 fix, use 'replace' for display
-    filename = decode_raw_83_name(entry_data, errors='replace')
+    name = decode_raw_83_name(entry_data, errors='replace')
     attributes = entry_data[11]
     reserved = entry_data[12]
     creation_time_tenth = entry_data[13]
@@ -366,7 +349,7 @@ def parse_raw_short_entry(entry_data: bytes) -> dict:
     attr_str = ",".join(attr_flags) if attr_flags else "-"
     
     return {
-        'filename': filename,
+        'name': name,
         'attr': attributes,
         'attr_str': attr_str,
         'reserved': reserved,
