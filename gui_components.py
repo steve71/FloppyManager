@@ -824,19 +824,25 @@ class SortableTreeWidgetItem(QTreeWidgetItem):
                 return my_is_dir > other_is_dir
 
         # Secondary sort: by the selected column's data
-        column = self.treeWidget().sortColumn()
+        tree = self.treeWidget()
+        if tree is None:
+            return self.text(0) < other.text(0)
+            
+        column = tree.sortColumn()
+        if column == -1:
+            column = 0
+            
         my_data = self.data(column, Qt.ItemDataRole.UserRole)
         other_data = other.data(column, Qt.ItemDataRole.UserRole)
         
         if my_data is not None and other_data is not None:
             # For column 0 (Filename), UserRole is the entry dict. Fall back to text sorting.
-            if isinstance(my_data, dict):
-                return super().__lt__(other)
-            # For other columns, UserRole is specific sort data (size, timestamp).
-            return my_data < other_data
+            if not isinstance(my_data, dict):
+                return my_data < other_data
             
         # Fallback to default text-based sorting for the column
-        return super().__lt__(other)
+        # Avoid super().__lt__ to prevent potential C++ segfaults
+        return self.text(column) < other.text(column)
 
 class FileTreeWidget(QTreeWidget):
     """Custom TreeWidget that supports dragging files out and dropping files in"""
