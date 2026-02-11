@@ -29,29 +29,75 @@ Verified to work on my Yamaha DGX-500 keyboard and Gotek SFR1M44-U100LQD 3.5inch
 
 ---
 
-## Quick Start
+## Build Instructions
 
-### 1 Check Python
-```
-Make sure Python is installed
-```
-- If not installed, install from python.org
-- Install pip, Pyinstaller and PySide6
+### Windows Build Instructions
 
-### 2 Build Application  
-```
-Double-click: BUILD.bat
-```
-- Builds executable
+1. **Install Python 3**
+   - Download and install from [python.org](https://www.python.org/downloads/)
+   - Ensure **"Add Python to PATH"** is checked during installation.
 
-### 3 Run Your App
-```
-dist\FAT12 Floppy Manager.exe
-```
-- Copy to Desktop
-- Double-click to run
+2. **Install Dependencies**
+   ```bash
+   pip install PySide6 pyinstaller
+   ```
 
----
+3. **Build Application**
+   - Double-click `BUILD.bat`
+   - Or run in Command Prompt:
+     ```cmd
+     python -m PyInstaller --clean --noconfirm ^
+         --name "FAT12 Floppy Manager" ^
+         --onefile ^
+         --windowed ^
+         --icon=floppy_icon.ico ^
+         --add-data "floppy_icon.ico;." ^
+         fat12_floppy_manager.py
+     ```
+
+   *Note: The executable will be in the `dist` folder.*
+
+### Linux Build Instructions
+
+1. **Install Python 3 and pip**
+   ```bash
+   sudo apt install python3 python3-pip
+   ```
+
+2. **Install Dependencies**
+   ```bash
+   pip install PySide6 pyinstaller
+   ```
+
+3. **Build Application**
+   ```bash
+   python3 -m PyInstaller --clean --noconfirm \
+       --name "FAT12 Floppy Manager" \
+       --onefile \
+       --windowed \
+       --icon=floppy_icon.ico \
+       --add-data "floppy_icon.ico:." \
+       fat12_floppy_manager.py
+   ```
+
+### macOS Build Instructions
+
+1. **Install Python 3**
+   - Recommended: Install via Homebrew:
+     ```bash
+     brew install python
+     ```
+
+2. **Build Application**
+   - Double-click `BUILD_MAC.command`
+   - Or run in terminal:
+     ```bash
+     chmod +x BUILD_MAC.command
+     ./BUILD_MAC.command
+     ```
+
+   *Note: The executable will be in the `dist` folder.*
+
 
 ## Features
 
@@ -117,13 +163,10 @@ dist\FAT12 Floppy Manager.exe
 ## System Requirements
 
 ### For Building:
-- Windows 10+
-- Python 3.9+
-- Internet connection
-- 500 MB free space
+- Windows 10+, Linux, or macOS
 
 ### For Running:
-- Windows 10+
+- Windows 10+, Linux, or macOS
 
 ---
 
