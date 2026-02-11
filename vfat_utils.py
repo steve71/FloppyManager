@@ -6,6 +6,16 @@ import datetime
 from pathlib import Path
 from typing import List, Tuple, Optional
 
+# Standard Directory Entry Constants (32 bytes)
+DIR_ATTR_OFFSET = 11             # Offset to Attribute byte
+DIR_CRT_TIME_TENTH_OFFSET = 13   # Offset to Creation Time Tenths
+DIR_LAST_MOD_TIME_OFFSET = 22    # Offset to Last Modified Time
+DIR_SHORT_NAME_LEN = 11          # Length of 8.3 name (8 + 3) without dot
+
+# Long Filename (LFN) Entry Constants (32 bytes)
+LFN_ATTR_OFFSET = 11             # Offset to Attribute byte (Must be 0x0F)
+LFN_CHECKSUM_OFFSET = 13         # Offset to Checksum
+
 def decode_fat_time(time_value: int) -> str:
     """Decode FAT time format to HH:MM:SS string
 
@@ -248,16 +258,16 @@ def create_lfn_entries(long_name: str, short_name: bytes) -> List[bytes]:
         chunk = lfn_unicode[chunk_start : chunk_start + 26]
 
         # Characters 1-5 (bytes 1-10)
-        entry[1:11] = chunk[0:10]
+        entry[1:LFN_ATTR_OFFSET] = chunk[0:10]
 
         # Attribute (0x0F = LFN)
-        entry[11] = 0x0F
+        entry[LFN_ATTR_OFFSET] = 0x0F
 
         # Type (0 = sub-component of long name)
         entry[12] = 0
 
         # Checksum
-        entry[13] = checksum
+        entry[LFN_CHECKSUM_OFFSET] = checksum
 
         # Characters 6-11 (bytes 14-25)
         entry[14:26] = chunk[10:22]
@@ -279,10 +289,10 @@ def parse_raw_lfn_entry(entry_data: bytes) -> dict:
     seq = entry_data[0]
     is_last = (seq & 0x40) != 0
     seq_num = seq & 0x1F
-    checksum = entry_data[13]
+    checksum = entry_data[LFN_CHECKSUM_OFFSET]
     lfn_type = entry_data[12]
     first_cluster = struct.unpack('<H', entry_data[26:28])[0]
-    attr = entry_data[11]
+    attr = entry_data[LFN_ATTR_OFFSET]
     
     chars1 = entry_data[1:11]
     chars2 = entry_data[14:26]
@@ -316,7 +326,7 @@ def parse_raw_lfn_entry(entry_data: bytes) -> dict:
 
 def decode_raw_83_name(entry_data: bytes, errors: str = 'replace') -> str:
     """Decode raw 11-byte 8.3 name, handling 0x05 lead byte"""
-    raw = list(entry_data[0:11])
+    raw = list(entry_data[0:DIR_SHORT_NAME_LEN])
     if raw[0] == 0x05:
         raw[0] = 0xE5
     return bytes(raw).decode('ascii', errors=errors)
@@ -326,14 +336,14 @@ def parse_raw_short_entry(entry_data: bytes) -> dict:
     """Parse a raw 32-byte short (8.3) entry into a dictionary of fields"""
     # Use decode_raw_83_name to handle 0x05 fix, use 'replace' for display
     name = decode_raw_83_name(entry_data, errors='replace')
-    attributes = entry_data[11]
+    attributes = entry_data[DIR_ATTR_OFFSET]
     reserved = entry_data[12]
-    creation_time_tenth = entry_data[13]
+    creation_time_tenth = entry_data[DIR_CRT_TIME_TENTH_OFFSET]
     creation_time = struct.unpack('<H', entry_data[14:16])[0]
     creation_date = struct.unpack('<H', entry_data[16:18])[0]
     last_access_date = struct.unpack('<H', entry_data[18:20])[0]
     first_cluster_high = struct.unpack('<H', entry_data[20:22])[0]
-    last_modified_time = struct.unpack('<H', entry_data[22:24])[0]
+    last_modified_time = struct.unpack('<H', entry_data[DIR_LAST_MOD_TIME_OFFSET:DIR_LAST_MOD_TIME_OFFSET+2])[0]
     last_modified_date = struct.unpack('<H', entry_data[24:26])[0]
     first_cluster_low = struct.unpack('<H', entry_data[26:28])[0]
     file_size = struct.unpack('<I', entry_data[28:32])[0]
@@ -396,11 +406,11 @@ def decode_short_name(entry_data: bytes) -> Tuple[str, str]:
 
 def format_83_name(raw_name_11: str) -> str:
     """Format an 11-character raw 8.3 name (e.g. 'FILE    TXT') to display format ('FILE.TXT')"""
-    if len(raw_name_11) < 11:
+    if len(raw_name_11) < DIR_SHORT_NAME_LEN:
         return raw_name_11.strip()
         
     name = raw_name_11[:8].strip()
-    ext = raw_name_11[8:11].strip()
+    ext = raw_name_11[8:DIR_SHORT_NAME_LEN].strip()
     
     if ext:
         return f"{name}.{ext}"

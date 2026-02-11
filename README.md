@@ -76,6 +76,7 @@ dist\FAT12 Floppy Manager.exe
 - **Delete files** - Delete selected files or all files (Del/Backspace key)
 - **Extract files** - Extract selected files, all files, drag to extract, or export all to a ZIP archive
 - **Format disk** - Erase all files and reset the disk to empty state
+- **Defragment disk** - Optimize disk by making all files contiguous
 - **Sort columns** - Click any column header
 - **Search/Filter** - Filter files by filename
 - **Disk space** - Real-time monitoring

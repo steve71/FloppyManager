@@ -363,6 +363,11 @@ class FloppyManagerWindow(QMainWindow):
         format_action.triggered.connect(self.format_disk)
         file_menu.addAction(format_action)
 
+        defrag_action = QAction("&Defragment Disk", self)
+        defrag_action.setToolTip("Optimize disk by making all files contiguous")
+        defrag_action.triggered.connect(self.defragment_disk)
+        file_menu.addAction(defrag_action)
+
         file_menu.addSeparator()
 
         exit_action = QAction("E&xit", self)
@@ -1516,6 +1521,29 @@ class FloppyManagerWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to format disk: {e}")
 
+    def defragment_disk(self):
+        """Defragment the disk"""
+        if not self.image:
+            QMessageBox.information(self, "No Image Loaded", "No image loaded.")
+            return
+            
+        response = QMessageBox.question(
+            self,
+            "Defragment Disk",
+            "This will reorganize all files to be contiguous and sorted.\n"
+            "This operation rewrites the entire disk image.\n\n"
+            "Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if response == QMessageBox.StandardButton.Yes:
+            if self.image.defragment_filesystem():
+                self.refresh_file_list()
+                self.status_bar.showMessage("Disk defragmented successfully")
+                QMessageBox.information(self, "Success", "Disk defragmentation complete.")
+            else:
+                QMessageBox.critical(self, "Error", "Defragmentation failed. Check console for details.")
+
     def open_image(self):
         """Open a different floppy image"""
         filename, _ = QFileDialog.getOpenFileName(
@@ -1569,6 +1597,7 @@ class FloppyManagerWindow(QMainWindow):
         <li>Delete files (selected or all)</li>
         <li>Extract files (selected, all, or to ZIP)</li>
         <li>Format disk</li>
+        <li>Defragment disk</li>
         <li>Search/Filter files by filename</li>
         <li>Boot Sector, Root Dir & FAT Viewers</li>
         <li>Modern UI with Toolbar and Light/Dark themes</li>

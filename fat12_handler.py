@@ -17,7 +17,8 @@ from typing import List, Optional
 
 from vfat_utils import (encode_fat_time, encode_fat_date, 
                         generate_83_name, create_lfn_entries, 
-                        format_83_name)
+                        format_83_name, DIR_ATTR_OFFSET, DIR_CRT_TIME_TENTH_OFFSET,
+                        DIR_SHORT_NAME_LEN, DIR_LAST_MOD_TIME_OFFSET)
 
 from fat12_directory import (
     read_directory, get_existing_83_names_in_directory,
@@ -426,7 +427,7 @@ class FAT12Image:
         
         # Generate 8.3 name
         short_name_83 = generate_83_name(filename, existing_83_names, use_numeric_tail)
-        short_name_bytes = short_name_83.encode('ascii')[:11]  # 11 bytes, no dot
+        short_name_bytes = short_name_83.encode('ascii')[:DIR_SHORT_NAME_LEN]  # 11 bytes, no dot
         
         # Determine if we need LFN entries
         # Reconstruct what the short name looks like with a dot
@@ -451,8 +452,8 @@ class FAT12Image:
         try:
             # Create short directory entry
             entry = bytearray(32)
-            entry[0:11] = short_name_bytes
-            entry[11] = 0x20  # Archive attribute
+            entry[0:DIR_SHORT_NAME_LEN] = short_name_bytes
+            entry[DIR_ATTR_OFFSET] = 0x20  # Archive attribute
             
             # Set date/time (current)
             now = datetime.datetime.now()
@@ -463,11 +464,11 @@ class FAT12Image:
             modified_time = encode_fat_time(mod_dt)
             modified_date = encode_fat_date(mod_dt)
             
-            entry[13] = 0  # Creation time tenth
+            entry[DIR_CRT_TIME_TENTH_OFFSET] = 0  # Creation time tenth
             entry[14:16] = struct.pack('<H', creation_time)
             entry[16:18] = struct.pack('<H', creation_date)
             entry[18:20] = struct.pack('<H', creation_date)  # Last access date
-            entry[22:24] = struct.pack('<H', modified_time)  # Last modified time
+            entry[DIR_LAST_MOD_TIME_OFFSET:DIR_LAST_MOD_TIME_OFFSET+2] = struct.pack('<H', modified_time)  # Last modified time
             entry[24:26] = struct.pack('<H', modified_date)  # Last modified date
             
             if len(data) > 0:
@@ -755,7 +756,7 @@ class FAT12Image:
                     return False
                 
                 # Attribute byte is at offset 11 in the directory entry
-                f.seek(offset + 11)
+                f.seek(offset + DIR_ATTR_OFFSET)
                 f.write(bytes([new_attr]))
             
             return True
@@ -806,3 +807,84 @@ class FAT12Image:
                     remaining -= write_size
                 f.flush()
                 os.fsync(f.fileno())
+
+    def defragment_filesystem(self) -> bool:
+        """
+        Defragment the filesystem by reading all files to memory,
+        formatting the disk, and writing them back contiguously.
+        Preserves attributes and timestamps.
+        """
+        try:
+            # 1. Collect all items recursively
+            all_items = [] # List of (parent_path_tuple, entry_dict)
+            files_data = {} # Map id(entry) -> bytes
+            
+            def collect(cluster, parent_path):
+                entries = self.read_directory(cluster)
+                for entry in entries:
+                    if entry['name'] in ('.', '..'): continue
+                    
+                    all_items.append( (parent_path, entry) )
+                    
+                    if entry['is_dir']:
+                        collect(entry['cluster'], parent_path + (entry['name'],))
+                    else:
+                        files_data[id(entry)] = self.extract_file(entry)
+            
+            collect(None, ())
+            
+            # 2. Format (Quick format preserves BPB but clears FAT/Root)
+            self.format_disk(full_format=False)
+            
+            # 3. Restore
+            # Map path tuple to cluster ID. Root is None.
+            path_to_cluster = { (): None }
+            
+            # Sort by path length (parents first) then name (alphabetical sort)
+            all_items.sort(key=lambda x: (len(x[0]), x[1]['name']))
+            
+            for parent_path, entry in all_items:
+                parent_cluster = path_to_cluster[parent_path]
+                
+                if entry['is_dir']:
+                    if not self.create_directory(entry['name'], parent_cluster, use_numeric_tail=True):
+                        return False
+                        
+                    # Find the new cluster
+                    new_entries = self.read_directory(parent_cluster)
+                    new_entry = next(e for e in new_entries if e['name'] == entry['name'])
+                    path_to_cluster[parent_path + (entry['name'],)] = new_entry['cluster']
+                    target_entry = new_entry
+                else:
+                    data = files_data[id(entry)]
+                    if not self.write_file_to_image(entry['name'], data, use_numeric_tail=True, parent_cluster=parent_cluster):
+                        return False
+                    
+                    # Find the new entry to patch metadata
+                    new_entries = self.read_directory(parent_cluster)
+                    target_entry = next(e for e in new_entries if e['name'] == entry['name'])
+
+                # Patch Metadata (Attributes & Timestamps) directly
+                with open(self.image_path, 'r+b') as f:
+                    offset = get_entry_offset(self, parent_cluster, target_entry['index'])
+                    if offset != -1:
+                        # Attributes (Offset 11)
+                        f.seek(offset + DIR_ATTR_OFFSET)
+                        f.write(bytes([entry['attributes']]))
+                        
+                        # Timestamps (Offset 13-26)
+                        f.seek(offset + DIR_CRT_TIME_TENTH_OFFSET)
+                        f.write(struct.pack('B', entry['creation_time_tenth']))
+                        f.write(struct.pack('<H', entry['creation_time']))
+                        f.write(struct.pack('<H', entry['creation_date']))
+                        f.write(struct.pack('<H', entry['last_accessed_date']))
+                        # Skip High Cluster (2 bytes at 20)
+                        f.seek(offset + DIR_LAST_MOD_TIME_OFFSET)
+                        f.write(struct.pack('<H', entry['last_modified_time']))
+                        f.write(struct.pack('<H', entry['last_modified_date']))
+            
+            return True
+            
+        except Exception as e:
+            print(f"Defrag error: {e}")
+            return False

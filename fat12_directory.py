@@ -18,7 +18,9 @@ from vfat_utils import (
     decode_lfn_text, decode_short_name, decode_raw_83_name,
     calculate_lfn_checksum, create_lfn_entries, generate_83_name,
     format_83_name, decode_fat_date, decode_fat_time,
-    encode_fat_time, encode_fat_date
+    encode_fat_time, encode_fat_date,
+    DIR_ATTR_OFFSET, LFN_CHECKSUM_OFFSET, DIR_CRT_TIME_TENTH_OFFSET, DIR_SHORT_NAME_LEN,
+    DIR_LAST_MOD_TIME_OFFSET
 )
 
 def iter_directory_entries(fs, cluster: int = None):
@@ -105,12 +107,12 @@ def read_directory(fs, cluster: int = None) -> List[dict]:
             lfn_checksum = None
             continue
             
-        attr = entry_data[11]
+        attr = entry_data[DIR_ATTR_OFFSET]
             
         # Check if this is an LFN entry
         if attr == 0x0F:
             seq = entry_data[0]
-            checksum = entry_data[13]
+            checksum = entry_data[LFN_CHECKSUM_OFFSET]
                 
             text = decode_lfn_text(entry_data)
             if text is not None:
@@ -146,7 +148,7 @@ def read_directory(fs, cluster: int = None) -> List[dict]:
             long_name = None
             if lfn_parts and lfn_checksum is not None:
                 # Verify checksum
-                short_name_bytes = entry_data[0:11]
+                short_name_bytes = entry_data[0:DIR_SHORT_NAME_LEN]
                 calculated_checksum = calculate_lfn_checksum(short_name_bytes)
                     
                 if calculated_checksum == lfn_checksum:
@@ -156,11 +158,11 @@ def read_directory(fs, cluster: int = None) -> List[dict]:
             # Use long name if available, otherwise use short name
             display_name = long_name if long_name else short_name_83
                 
-            creation_time_tenth = entry_data[13]
+            creation_time_tenth = entry_data[DIR_CRT_TIME_TENTH_OFFSET]
             creation_time = struct.unpack('<H', entry_data[14:16])[0]
             creation_date = struct.unpack('<H', entry_data[16:18])[0]
             last_accessed_date = struct.unpack('<H', entry_data[18:20])[0]
-            last_modified_time = struct.unpack('<H', entry_data[22:24])[0]
+            last_modified_time = struct.unpack('<H', entry_data[DIR_LAST_MOD_TIME_OFFSET:DIR_LAST_MOD_TIME_OFFSET+2])[0]
             last_modified_date = struct.unpack('<H', entry_data[24:26])[0]
 
             if fs.fat_type == 'FAT32':
@@ -237,7 +239,7 @@ def get_existing_83_names_in_directory(fs, cluster: int = None) -> List[str]:
     for _, entry_data in iter_directory_entries(fs, cluster):
         if entry_data[0] in (0x00, 0xE5):
             continue
-        attr = entry_data[11]
+        attr = entry_data[DIR_ATTR_OFFSET]
         if attr == 0x0F or (attr & 0x08):
             continue
         names.append(decode_raw_83_name(entry_data).upper())
@@ -457,24 +459,24 @@ def initialize_directory(fs, dir_cluster: int, parent_cluster: int = None):
     
     # Create . entry
     dot_entry = bytearray(32)
-    dot_entry[0:11] = b'.          '
-    dot_entry[11] = 0x10
+    dot_entry[0:DIR_SHORT_NAME_LEN] = b'.          '
+    dot_entry[DIR_ATTR_OFFSET] = 0x10
     dot_entry[14:16] = struct.pack('<H', creation_time)
     dot_entry[16:18] = struct.pack('<H', creation_date)
     dot_entry[18:20] = struct.pack('<H', creation_date)
-    dot_entry[22:24] = struct.pack('<H', creation_time)
+    dot_entry[DIR_LAST_MOD_TIME_OFFSET:DIR_LAST_MOD_TIME_OFFSET+2] = struct.pack('<H', creation_time)
     dot_entry[24:26] = struct.pack('<H', creation_date)
     dot_entry[26:28] = struct.pack('<H', dir_cluster)
     dot_entry[28:32] = struct.pack('<I', 0)
     
     # Create .. entry
     dotdot_entry = bytearray(32)
-    dotdot_entry[0:11] = b'..         '
-    dotdot_entry[11] = 0x10
+    dotdot_entry[0:DIR_SHORT_NAME_LEN] = b'..         '
+    dotdot_entry[DIR_ATTR_OFFSET] = 0x10
     dotdot_entry[14:16] = struct.pack('<H', creation_time)
     dotdot_entry[16:18] = struct.pack('<H', creation_date)
     dotdot_entry[18:20] = struct.pack('<H', creation_date)
-    dotdot_entry[22:24] = struct.pack('<H', creation_time)
+    dotdot_entry[DIR_LAST_MOD_TIME_OFFSET:DIR_LAST_MOD_TIME_OFFSET+2] = struct.pack('<H', creation_time)
     dotdot_entry[24:26] = struct.pack('<H', creation_date)
     parent_clus = parent_cluster if parent_cluster is not None else 0
     dotdot_entry[26:28] = struct.pack('<H', parent_clus)
@@ -520,7 +522,7 @@ def create_directory(fs, dir_name: str, parent_cluster: int = None, use_numeric_
 
     existing_names = get_existing_83_names_in_directory(fs, parent_cluster)
     short_name_83 = generate_83_name(dir_name, existing_names, use_numeric_tail)
-    short_name_bytes = short_name_83.encode('ascii')[:11]
+    short_name_bytes = short_name_83.encode('ascii')[:DIR_SHORT_NAME_LEN]
     
     short_with_dot = format_83_name(short_name_83)
     needs_lfn = dir_name != short_with_dot
@@ -546,7 +548,7 @@ def create_directory(fs, dir_name: str, parent_cluster: int = None, use_numeric_
     
     entry = bytearray(32)
     entry[0:11] = short_name_bytes
-    entry[11] = 0x10
+    entry[DIR_ATTR_OFFSET] = 0x10
     entry[26:28] = struct.pack('<H', dir_cluster)
     
     write_directory_entries(fs, parent_cluster, entry_index, lfn_entries, entry)
@@ -593,7 +595,7 @@ def delete_directory_entry(fs, parent_cluster: int, entry_index: int) -> bool:
                 f.seek(offset)
                 entry_data = f.read(32)
                 
-                if entry_data and entry_data[11] == 0x0F:
+                if entry_data and entry_data[DIR_ATTR_OFFSET] == 0x0F:
                     f.seek(offset)
                     f.write(b'\xE5')
                     index -= 1
@@ -710,7 +712,7 @@ def rename_file(fs, entry: dict, new_name: str, use_numeric_tail: bool = False) 
 
         with open(fs.image_path, 'rb') as f:
             f.seek(get_entry_offset(fs, parent_cluster, entry['index']))
-            current_raw = f.read(11)
+            current_raw = f.read(DIR_SHORT_NAME_LEN)
             current_name_11 = decode_raw_83_name(current_raw).upper()
 
         if current_name_11 in existing_names:
@@ -720,9 +722,9 @@ def rename_file(fs, entry: dict, new_name: str, use_numeric_tail: bool = False) 
         short_name_11 = generate_83_name(new_name, existing_names, use_numeric_tail)
         
         try:
-            raw_short_name = short_name_11.encode('ascii')[:11]
+            raw_short_name = short_name_11.encode('ascii')[:DIR_SHORT_NAME_LEN]
         except UnicodeEncodeError:
-            raw_short_name = short_name_11.encode('ascii', 'ignore').ljust(11, b' ')[:11]
+            raw_short_name = short_name_11.encode('ascii', 'ignore').ljust(DIR_SHORT_NAME_LEN, b' ')[:DIR_SHORT_NAME_LEN]
 
         # Generate LFN entries if needed
         base = short_name_11[:8].strip()
@@ -747,7 +749,7 @@ def rename_file(fs, entry: dict, new_name: str, use_numeric_tail: bool = False) 
                 if offset == -1: break
                 f.seek(offset)
                 data = f.read(32)
-                if data[11] == 0x0F: # Attribute 0x0F is LFN
+                if data[DIR_ATTR_OFFSET] == 0x0F: # Attribute 0x0F is LFN
                     old_lfn_indices.append(idx)
                     idx -= 1
                 else:
@@ -801,7 +803,7 @@ def rename_file(fs, entry: dict, new_name: str, use_numeric_tail: bool = False) 
 
             # Write New Short Entry
             new_short_entry = original_entry_data
-            new_short_entry[0:11] = raw_short_name # Update 8.3 name
+            new_short_entry[0:DIR_SHORT_NAME_LEN] = raw_short_name # Update 8.3 name
 
             short_entry_idx = write_start_index + len(new_lfn_entries)
             offset = get_entry_offset(fs, parent_cluster, short_entry_idx, fat_data)
