@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0"
 REM FAT12 Floppy Manager
 
 echo.
@@ -71,7 +72,7 @@ python -m PyInstaller --clean --noconfirm ^
     --onefile ^
     --windowed ^
     --icon=floppy_icon.ico ^
-    --add-data "fat12_handler.py;." ^
+    --add-data "floppy_icon.ico;." ^
     fat12_floppy_manager.py
 
 echo.
