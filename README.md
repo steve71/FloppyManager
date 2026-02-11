@@ -62,6 +62,8 @@ dist\FAT12 Floppy Manager.exe
 
 ### File Management
 - **Create new blank floppy images** - standard 1.44MB FAT12 floppy images
+- **Open existing floppy images** - Open and manage files on existing .img files
+- **Close image** - Close the current image to return to empty state
 - **Sector-Level Precision**: Writes directly to the image file without needing to mount it as a drive
 - **Smart Truncation**: Automatically converts long filenames (e.g., `My_Favorite_Song.mid`) to the hardware-compliant 8.3 format (`MY_FAV~1.MID`) (Windows or no numeric tail option).
 - **VFAT Filename Displayed in Table** - Displays both long filenames and 8.3 short names as well as size and type
@@ -92,6 +94,7 @@ dist\FAT12 Floppy Manager.exe
 - **Ctrl+A** - Select all
 - **Ctrl+N** - Create new image
 - **Ctrl+O** - Open different image
+- **Ctrl+W** - Close image
 - **Ctrl+Shift+S** - Save image as
 - **Ctrl+Shift+F** - Format disk
 

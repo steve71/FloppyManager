@@ -337,6 +337,12 @@ class FloppyManagerWindow(QMainWindow):
         open_action.triggered.connect(self.open_image)
         file_menu.addAction(open_action)
 
+        close_action = QAction("&Close Image", self)
+        close_action.setShortcut(QKeySequence.StandardKey.Close)
+        close_action.setToolTip("Close the current floppy image")
+        close_action.triggered.connect(self.close_image)
+        file_menu.addAction(close_action)
+
         file_menu.addSeparator()
 
         save_as_action = QAction("Save Image &As...", self)
@@ -1470,6 +1476,15 @@ class FloppyManagerWindow(QMainWindow):
         if filename:
             self.load_image(filename)
 
+    def close_image(self):
+        """Close the currently open image"""
+        if self.image:
+            self.image = None
+            self.image_path = None
+            self.setWindowTitle("FAT12 Floppy Manager")
+            self.refresh_file_list()
+            self.status_bar.showMessage("Image closed")
+
     def show_about(self):
         """Show about dialog"""
         about_text = """<h2>FAT12 Floppy Manager</h2>
@@ -1485,17 +1500,19 @@ class FloppyManagerWindow(QMainWindow):
         <li>Windows-compatible 8.3 name generation</li>
         <li>Toggleable numeric tail mode</li>
         <li>Create new blank floppy images</li>
+        <li>Open existing floppy images</li>
+        <li>Close image</li>
         <li>Writes directly to image (no mounting)</li>
         <li>Displays long filenames and 8.3 short names</li>
         <li>Save copies of floppy images</li>
         <li>Directory support (Create/Delete/Navigate)</li>
-        <li>Drag and drop support</li>
-        <li>View and edit file attributes</li>
         </ul>
         </td>
 
         <td valign="top" width="50%">
         <ul>
+        <li>Drag and drop support</li>
+        <li>View and edit file attributes</li>
         <li>Rename files (Windows-style inline)</li>
         <li>Delete files (selected or all)</li>
         <li>Extract files (selected, all, or to ZIP)</li>
@@ -1513,6 +1530,7 @@ class FloppyManagerWindow(QMainWindow):
         <ul>
         <li>Ctrl+N - Create new image</li>
         <li>Ctrl+O - Open image</li>
+        <li>Ctrl+W - Close image</li>
         <li>Ctrl+Shift+S - Save image as</li>
         <li>Ctrl+Shift+F - Format disk</li>
         <li>Del/Backspace - Delete selected files</li>
