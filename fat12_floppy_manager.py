@@ -751,6 +751,11 @@ class FloppyManagerWindow(QMainWindow):
                 # Get search text
                 search_text = self.search_input.text().lower().strip() if hasattr(self, 'search_input') else ""
                 
+                # Get current sort settings to pre-sort entries
+                header = self.table.header()
+                sort_col = header.sortIndicatorSection()
+                ascending = (header.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder)
+
                 # Iterative approach to prevent stack overflow and segfaults
                 # Stack contains tuples: (parent_item, cluster_id)
                 # Start with Root (cluster None)
@@ -770,9 +775,27 @@ class FloppyManagerWindow(QMainWindow):
 
                     entries = self.image.read_directory(cluster)
                     
-                    # Pre-sort entries to match default view (Directories first, then Filename)
-                    # This reduces visual flicker when sorting is re-enabled
-                    entries.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
+                    # Pre-sort entries to match current table sort state
+                    # This prevents visual jumping/flickering when sorting is re-enabled
+                    def get_sort_key(e):
+                        # Primary: Directories first (0) vs Files (1)
+                        type_group = 0 if e['is_dir'] else 1
+                        
+                        # Secondary: Column data
+                        val = ""
+                        if sort_col == 0: val = e['name'].lower()
+                        elif sort_col == 1: val = e['short_name'].lower()
+                        elif sort_col == 2: val = (e['last_modified_date'] << 16) + e['last_modified_time']
+                        elif sort_col == 3: val = e['file_type'].lower()
+                        elif sort_col == 4: val = e['size']
+                        elif sort_col == 5: val = e['attributes']
+                        else: val = e['name'].lower()
+                        
+                        return (type_group, val)
+
+                    entries.sort(key=get_sort_key)
+                    if not ascending:
+                        entries.reverse()
                     
                     for entry in entries:
                         if entry['name'] in ('.', '..'): continue
@@ -863,10 +886,10 @@ class FloppyManagerWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to read directory: {e}")
         finally:
+            # Re-enable sorting immediately (no timer) to prevent flicker
+            self.table.setSortingEnabled(True)
             self.table.setUpdatesEnabled(True)
             self.table.blockSignals(False)
-            # Defer sorting to prevent potential segfaults during heavy updates
-            QTimer.singleShot(10, lambda: self.table.setSortingEnabled(True))
 
     def show_boot_sector_info(self):
         """Show boot sector information"""
