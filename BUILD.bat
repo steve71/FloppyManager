@@ -29,28 +29,37 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/3] Installing required packages...
-echo This may take a minute...
-python -m pip install PySide6 pyinstaller --quiet --disable-pip-version-check
+echo [2/3] Checking required packages...
+python -c "import PySide6; import PyInstaller; import win32ctypes" >nul 2>&1
 if errorlevel 1 (
-    echo.
-    echo   Warning: Quick install failed, trying with verbose output...
-    echo.
-    python -m pip install PySide6 pyinstaller
+    echo   Packages missing. Installing...
+    echo   This may take a minute...
+    python -m pip install PySide6 pyinstaller pywin32-ctypes --quiet --disable-pip-version-check
     if errorlevel 1 (
         echo.
-        echo   [X] Installation failed
+        echo   Warning: Quick install failed, trying with verbose output...
         echo.
-        echo   Common fixes:
-        echo   - Check your internet connection
-        echo   - Try running as administrator
-        echo   - Make sure firewall isn't blocking Python
-        echo.
-        pause
-        exit /b 1
+        python -m pip install PySide6 pyinstaller pywin32-ctypes
+        if errorlevel 1 (
+            echo.
+            echo   [!] Standard installation failed.
+            echo   Attempting with --break-system-packages ^(for managed environments^)...
+            echo.
+            python -m pip install PySide6 pyinstaller pywin32-ctypes --break-system-packages
+            if errorlevel 1 (
+                echo.
+                echo   [!] Installation failed or restricted.
+                echo.
+                echo   Attempting to proceed with build anyway...
+                echo   ^(If build fails, please install PySide6, PyInstaller, and pywin32-ctypes manually^)
+                echo.
+            )
+        )
     )
+    echo   [OK] Package check complete
+) else (
+    echo   [OK] Packages already installed.
 )
-echo   [OK] Packages installed
 
 echo.
 echo [3/3] Building executable...
