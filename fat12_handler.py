@@ -100,18 +100,7 @@ class FAT12Image:
             'sectors_per_fat': 2,
             'reserved_sectors': 1,
             'hidden_sectors': 0
-        },
-        '32M': {
-            'name': 'Experimental 32MB (FAT12 Max)',
-            'total_sectors': 65344,
-            'sectors_per_cluster': 16,
-            'sectors_per_track': 32,
-            'heads': 2,
-            'root_entries': 512,
-            'media_descriptor': 0xF0,
-            'sectors_per_fat': 12,
-            'reserved_sectors': 1,
-            'hidden_sectors': 0
+        }
         }
     }
 
