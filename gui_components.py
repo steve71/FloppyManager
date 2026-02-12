@@ -1019,10 +1019,49 @@ class FileTreeWidget(QTreeWidget):
                             parent_cluster = entry.get('parent_cluster')
                             if parent_cluster == 0: parent_cluster = None
                 
+                # Check for circular reference (folder into itself or subfolder)
+                if is_internal:
+                    source_items = self.selectedItems()
+                    for item in source_items:
+                        src_entry = item.data(0, Qt.ItemDataRole.UserRole)
+                        if src_entry and src_entry.get('is_dir'):
+                            src_cluster = src_entry['cluster']
+                            
+                            # Check if target is the source folder itself
+                            if parent_cluster == src_cluster:
+                                event.ignore()
+                                return
+                            
+                            # Check if target is a subfolder of source
+                            # Traverse up from parent_cluster
+                            curr_cluster = parent_cluster
+                            
+                            # Safety counter to prevent infinite loops in corrupted FS
+                            safety_counter = 0
+                            while curr_cluster is not None and curr_cluster != 0 and safety_counter < 100:
+                                if curr_cluster == src_cluster:
+                                    event.ignore()
+                                    return
+                                
+                                # Get parent of curr_cluster
+                                try:
+                                    dir_entries = main_window.image.read_directory(curr_cluster)
+                                    dotdot = next((e for e in dir_entries if e['name'] == '..'), None)
+                                    
+                                    if dotdot:
+                                        curr_cluster = dotdot['cluster']
+                                        if curr_cluster == 0: curr_cluster = None
+                                    else:
+                                        break
+                                except Exception:
+                                    break
+                                
+                                safety_counter += 1
+
                 entries_to_delete = []
                 if is_internal and not is_copy:
                     # Check if moving to same folder
-                    source_items = self.selectedItems()
+                    # source_items already populated above
                     if source_items:
                         first_entry = source_items[0].data(0, Qt.ItemDataRole.UserRole)
                         source_parent = first_entry.get('parent_cluster')
