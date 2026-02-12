@@ -1747,7 +1747,7 @@ class FloppyManagerWindow(QMainWindow):
             return
         
         # Show the attributes dialog
-        dialog = FileAttributesDialog(entry, self)
+        dialog = FileAttributesDialog(entry, self.image, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             # Get the new attributes
             attrs = dialog.get_attributes()

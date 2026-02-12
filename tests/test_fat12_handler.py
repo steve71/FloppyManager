@@ -894,6 +894,23 @@ class TestHelperMethods:
         # Should decrease by 2 clusters
         assert handler.get_free_space() == initial_free - 1024
 
+    def test_calculate_size_on_disk(self, tmp_path):
+        img_path = tmp_path / "test_ondisk.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Cluster size is 512 bytes for 1.44MB image
+        assert handler.bytes_per_cluster == 512
+        
+        # 0 bytes -> 0 on disk
+        assert handler.calculate_size_on_disk(0) == 0
+        # 1 byte -> 1 cluster (512)
+        assert handler.calculate_size_on_disk(1) == 512
+        # 512 bytes -> 1 cluster (512)
+        assert handler.calculate_size_on_disk(512) == 512
+        # 513 bytes -> 2 clusters (1024)
+        assert handler.calculate_size_on_disk(513) == 1024
+
     def test_find_entry_by_83_name(self, tmp_path):
         img_path = tmp_path / "test_find.img"
         FAT12Image.create_empty_image(str(img_path))

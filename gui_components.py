@@ -720,9 +720,10 @@ class FATViewer(QDialog):
 class FileAttributesDialog(QDialog):
     """Dialog for editing file attributes"""
     
-    def __init__(self, entry: dict, parent=None):
+    def __init__(self, entry: dict, image: FAT12Image = None, parent=None):
         super().__init__(parent)
         self.entry = entry
+        self.image = image
         self.setup_ui()
         
     def setup_ui(self):
@@ -730,47 +731,101 @@ class FileAttributesDialog(QDialog):
         is_dir = self.entry.get('is_dir', False)
         type_label = "Folder" if is_dir else "File"
         
-        self.setWindowTitle(f"{type_label} Attributes - {self.entry['name']}")
+        self.setWindowTitle(f"{type_label} Properties")
         self.setModal(True)
         
         layout = QVBoxLayout(self)
         
         # Info label
         info_label = QLabel(f"<b>{type_label}:</b> {self.entry['name']}")
+        info_label.setWordWrap(True)
         layout.addWidget(info_label)
         
         # Add spacing
-        layout.addSpacing(10)
+        layout.addSpacing(5)
+        
+        # --- Size Info ---
+        info_grid = QGridLayout()
+        info_grid.setColumnStretch(1, 1)
+        
+        row = 0
+        
+        # Size
+        size_bytes = self.entry['size']
+        info_grid.addWidget(QLabel("Size:"), row, 0)
+        info_grid.addWidget(QLabel(f"{size_bytes:,} bytes"), row, 1)
+        row += 1
+        
+        # Size on Disk
+        if not is_dir and self.image:
+            on_disk = self.image.calculate_size_on_disk(size_bytes)
+            
+            info_grid.addWidget(QLabel("Size on disk:"), row, 0)
+            info_grid.addWidget(QLabel(f"{on_disk:,} bytes"), row, 1)
+            row += 1
+            
+        layout.addLayout(info_grid)
+        
+        # Divider 1
+        line1 = QFrame()
+        line1.setFrameShape(QFrame.Shape.HLine)
+        line1.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(line1)
+        
+        # --- Timestamps ---
+        time_grid = QGridLayout()
+        time_grid.setColumnStretch(1, 1)
+        
+        t_row = 0
+        time_grid.addWidget(QLabel("Created:"), t_row, 0)
+        time_grid.addWidget(QLabel(self.entry.get('creation_datetime_str', 'N/A')), t_row, 1)
+        t_row += 1
+        
+        time_grid.addWidget(QLabel("Modified:"), t_row, 0)
+        time_grid.addWidget(QLabel(self.entry.get('last_modified_datetime_str', 'N/A')), t_row, 1)
+        t_row += 1
+        
+        time_grid.addWidget(QLabel("Accessed:"), t_row, 0)
+        time_grid.addWidget(QLabel(self.entry.get('last_accessed_str', 'N/A')), t_row, 1)
+        t_row += 1
+        
+        layout.addLayout(time_grid)
+        
+        # Divider 2
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.Shape.HLine)
+        line2.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(line2)
         
         # Create checkboxes for each attribute
         from PySide6.QtWidgets import QCheckBox, QGroupBox
         
-        attr_group = QGroupBox(f"{type_label} Attributes")
-        attr_layout = QVBoxLayout()
+        attr_group = QGroupBox("Attributes")
+        attr_layout = QGridLayout()
         
         # Read-only checkbox
         self.readonly_cb = QCheckBox("Read-only")
         self.readonly_cb.setChecked(self.entry['is_read_only'])
         self.readonly_cb.setToolTip(f"Prevents the {type_label.lower()} from being modified or deleted")
-        attr_layout.addWidget(self.readonly_cb)
+        attr_layout.addWidget(self.readonly_cb, 0, 0)
         
         # Hidden checkbox
         self.hidden_cb = QCheckBox("Hidden")
         self.hidden_cb.setChecked(self.entry['is_hidden'])
         self.hidden_cb.setToolTip(f"Hides the {type_label.lower()} from normal directory listings")
-        attr_layout.addWidget(self.hidden_cb)
-        
-        # System checkbox
-        self.system_cb = QCheckBox("System")
-        self.system_cb.setChecked(self.entry['is_system'])
-        self.system_cb.setToolTip(f"Marks the {type_label.lower()} as a system item")
-        attr_layout.addWidget(self.system_cb)
+        attr_layout.addWidget(self.hidden_cb, 0, 1)
         
         # Archive checkbox
         self.archive_cb = QCheckBox("Archive")
         self.archive_cb.setChecked(self.entry['is_archive'])
         self.archive_cb.setToolTip(f"Indicates the {type_label.lower()} has been modified since last backup")
-        attr_layout.addWidget(self.archive_cb)
+        attr_layout.addWidget(self.archive_cb, 1, 0)
+        
+        # System checkbox
+        self.system_cb = QCheckBox("System")
+        self.system_cb.setChecked(self.entry['is_system'])
+        self.system_cb.setToolTip(f"Marks the {type_label.lower()} as a system item")
+        attr_layout.addWidget(self.system_cb, 1, 1)
         
         attr_group.setLayout(attr_layout)
         layout.addWidget(attr_group)
@@ -793,8 +848,9 @@ class FileAttributesDialog(QDialog):
         
         layout.addLayout(button_layout)
         
-        # Set fixed size
-        self.setFixedSize(300, 240)
+        # Set size
+        self.setMinimumWidth(320)
+        self.adjustSize()
     
     def get_attributes(self):
         """Get the selected attributes as a dictionary"""
