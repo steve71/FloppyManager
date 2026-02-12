@@ -69,8 +69,7 @@ def iter_directory_entries(fs, cluster: int = None):
             
             while current_cluster >= 2 and current_cluster < 0xFF8:
                 if current_cluster in visited:
-                    print(f"Warning: Loop detected in directory cluster chain at {current_cluster}")
-                    break
+                    raise FAT12Error(f"Loop detected in directory cluster chain at {current_cluster}")
                 visited.add(current_cluster)
 
                 offset = fs.data_start + ((current_cluster - 2) * fs.bytes_per_cluster)
@@ -288,7 +287,7 @@ def find_free_directory_entries(fs, cluster: int = None, required_slots: int = 1
 
     Returns:
         The starting index of the found block of free entries.
-        Returns -1 if a sufficiently large block cannot be found or allocated
+        Raises FAT12Error if a sufficiently large block cannot be found or allocated
         (e.g., root directory is full, or the disk is out of free clusters).
     """
     consecutive = 0
@@ -326,7 +325,7 @@ def find_free_directory_entries(fs, cluster: int = None, required_slots: int = 1
     
     # Root directory cannot be expanded
     if cluster is None or cluster == 0:
-        return -1
+        raise FAT12Error("Root directory is full")
         
     # Subdirectory expansion logic
     if start_index == -1:
@@ -338,7 +337,7 @@ def find_free_directory_entries(fs, cluster: int = None, required_slots: int = 1
     
     free_clusters = fs.find_free_clusters(clusters_needed)
     if len(free_clusters) < clusters_needed:
-        return -1 # Disk full
+        raise FAT12Error("Disk full (cannot expand directory)")
         
     # Extend the cluster chain
     fat_data = fs.read_fat()
@@ -590,8 +589,6 @@ def create_directory(fs, dir_name: str, parent_cluster: int = None, use_numeric_
     dir_cluster = free_clusters[0]
     
     entry_index = find_free_directory_entries(fs, parent_cluster, total_entries)
-    if entry_index == -1:
-        raise FAT12Error("Disk full (root directory entries exhausted)")
         
     fat_data = fs.read_fat()
     fs.set_fat_entry(fat_data, dir_cluster, 0xFFF)
@@ -820,9 +817,6 @@ def rename_entry(fs, entry: dict, new_name: str, use_numeric_tail: bool = False)
     else:
         # CASE B: Needs more space -> Find new contiguous block
         write_start_index = find_free_directory_entries(fs, parent_cluster, total_new_slots)
-
-        if write_start_index == -1:
-            raise FAT12Error("Disk full (directory entries exhausted)")
 
         # We are moving, so delete ALL old slots
         slots_to_delete = range(current_start_index, current_start_index + total_old_slots)

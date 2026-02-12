@@ -1542,12 +1542,13 @@ class FloppyManagerWindow(QMainWindow):
         )
         
         if response == QMessageBox.StandardButton.Yes:
-            if self.image.defragment_filesystem():
+            try:
+                self.image.defragment_filesystem()
                 self.refresh_file_list()
                 self.status_bar.showMessage("Disk defragmented successfully")
                 QMessageBox.information(self, "Success", "Disk defragmentation complete.")
-            else:
-                QMessageBox.critical(self, "Error", "Defragmentation failed. Check console for details.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Defragmentation failed: {e}")
 
     def open_image(self):
         """Open a different floppy image"""

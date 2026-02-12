@@ -429,8 +429,6 @@ class FAT12Image:
         
         # Find free entries
         entry_index = find_free_directory_entries(self, parent_cluster, total_entries_needed)
-        if entry_index == -1:
-            raise FAT12Error("Disk full (directory entries exhausted)")
             
         # Create short directory entry
         entry = bytearray(32)
@@ -549,8 +547,7 @@ class FAT12Image:
             
             while current_cluster < 0xFF8 and remaining > 0:
                 if current_cluster in visited:
-                    print(f"Warning: Loop detected in file cluster chain at {current_cluster}")
-                    break
+                    raise FAT12Error(f"Loop detected in file cluster chain at {current_cluster}")
                 visited.add(current_cluster)
 
                 cluster_offset = self.data_start + ((current_cluster - 2) * self.bytes_per_cluster)
@@ -709,77 +706,70 @@ class FAT12Image:
         formatting the disk, and writing them back contiguously.
         Preserves attributes and timestamps.
         """
-        try:
-            # 1. Collect all items recursively
-            all_items = [] # List of (parent_path_tuple, entry_dict)
-            files_data = {} # Map id(entry) -> bytes
-            
-            def collect(cluster, parent_path):
-                entries = self.read_directory(cluster)
-                for entry in entries:
-                    if entry['name'] in ('.', '..'): continue
-                    
-                    all_items.append( (parent_path, entry) )
-                    
-                    if entry['is_dir']:
-                        collect(entry['cluster'], parent_path + (entry['name'],))
-                    else:
-                        files_data[id(entry)] = self.extract_file(entry)
-            
-            collect(None, ())
-            
-            # 2. Format (Quick format preserves BPB but clears FAT/Root)
-            self.format_disk(full_format=False)
-            
-            # 3. Restore
-            # Map path tuple to cluster ID. Root is None.
-            path_to_cluster = { (): None }
-            
-            # Sort by path length (parents first) then name (alphabetical sort)
-            all_items.sort(key=lambda x: (len(x[0]), x[1]['name']))
-            
-            for parent_path, entry in all_items:
-                parent_cluster = path_to_cluster[parent_path]
+        # 1. Collect all items recursively
+        all_items = [] # List of (parent_path_tuple, entry_dict)
+        files_data = {} # Map id(entry) -> bytes
+        
+        def collect(cluster, parent_path):
+            entries = self.read_directory(cluster)
+            for entry in entries:
+                if entry['name'] in ('.', '..'): continue
+                
+                all_items.append( (parent_path, entry) )
                 
                 if entry['is_dir']:
-                    if not self.create_directory(entry['name'], parent_cluster, use_numeric_tail=True):
-                        return False
-                        
-                    # Find the new cluster
-                    new_entries = self.read_directory(parent_cluster)
-                    new_entry = next(e for e in new_entries if e['name'] == entry['name'])
-                    path_to_cluster[parent_path + (entry['name'],)] = new_entry['cluster']
-                    target_entry = new_entry
+                    collect(entry['cluster'], parent_path + (entry['name'],))
                 else:
-                    data = files_data[id(entry)]
-                    if not self.write_file_to_image(entry['name'], data, use_numeric_tail=True, parent_cluster=parent_cluster):
-                        return False
+                    files_data[id(entry)] = self.extract_file(entry)
+        
+        collect(None, ())
+        
+        # 2. Format (Quick format preserves BPB but clears FAT/Root)
+        self.format_disk(full_format=False)
+        
+        # 3. Restore
+        # Map path tuple to cluster ID. Root is None.
+        path_to_cluster = { (): None }
+        
+        # Sort by path length (parents first) then name (alphabetical sort)
+        all_items.sort(key=lambda x: (len(x[0]), x[1]['name']))
+        
+        for parent_path, entry in all_items:
+            parent_cluster = path_to_cluster[parent_path]
+            
+            if entry['is_dir']:
+                self.create_directory(entry['name'], parent_cluster, use_numeric_tail=True)
                     
-                    # Find the new entry to patch metadata
-                    new_entries = self.read_directory(parent_cluster)
-                    target_entry = next(e for e in new_entries if e['name'] == entry['name'])
+                # Find the new cluster
+                new_entries = self.read_directory(parent_cluster)
+                new_entry = next(e for e in new_entries if e['name'] == entry['name'])
+                path_to_cluster[parent_path + (entry['name'],)] = new_entry['cluster']
+                target_entry = new_entry
+            else:
+                data = files_data[id(entry)]
+                self.write_file_to_image(entry['name'], data, use_numeric_tail=True, parent_cluster=parent_cluster)
+                
+                # Find the new entry to patch metadata
+                new_entries = self.read_directory(parent_cluster)
+                target_entry = next(e for e in new_entries if e['name'] == entry['name'])
 
-                # Patch Metadata (Attributes & Timestamps) directly
-                with open(self.image_path, 'r+b') as f:
-                    offset = get_entry_offset(self, parent_cluster, target_entry['index'])
-                    if offset != -1:
-                        # Attributes (Offset 11)
-                        f.seek(offset + DIR_ATTR_OFFSET)
-                        f.write(bytes([entry['attributes']]))
-                        
-                        # Timestamps (Offset 13-26)
-                        f.seek(offset + DIR_CRT_TIME_TENTH_OFFSET)
-                        f.write(struct.pack('B', entry['creation_time_tenth']))
-                        f.write(struct.pack('<H', entry['creation_time']))
-                        f.write(struct.pack('<H', entry['creation_date']))
-                        f.write(struct.pack('<H', entry['last_accessed_date']))
-                        # Skip High Cluster (2 bytes at 20)
-                        f.seek(offset + DIR_LAST_MOD_TIME_OFFSET)
-                        f.write(struct.pack('<H', entry['last_modified_time']))
-                        f.write(struct.pack('<H', entry['last_modified_date']))
-            
-            return True
-            
-        except Exception as e:
-            print(f"Defrag error: {e}")
-            return False
+            # Patch Metadata (Attributes & Timestamps) directly
+            with open(self.image_path, 'r+b') as f:
+                offset = get_entry_offset(self, parent_cluster, target_entry['index'])
+                if offset != -1:
+                    # Attributes (Offset 11)
+                    f.seek(offset + DIR_ATTR_OFFSET)
+                    f.write(bytes([entry['attributes']]))
+                    
+                    # Timestamps (Offset 13-26)
+                    f.seek(offset + DIR_CRT_TIME_TENTH_OFFSET)
+                    f.write(struct.pack('B', entry['creation_time_tenth']))
+                    f.write(struct.pack('<H', entry['creation_time']))
+                    f.write(struct.pack('<H', entry['creation_date']))
+                    f.write(struct.pack('<H', entry['last_accessed_date']))
+                    # Skip High Cluster (2 bytes at 20)
+                    f.seek(offset + DIR_LAST_MOD_TIME_OFFSET)
+                    f.write(struct.pack('<H', entry['last_modified_time']))
+                    f.write(struct.pack('<H', entry['last_modified_date']))
+        
+        return True
