@@ -133,21 +133,12 @@ class FAT12Image:
             self.total_sectors = struct.unpack('<I', boot_sector[32:36])[0]
 
         # Parse Extended BPB
-        # Check for EBPB signature (0x29) at offset 38
-        if boot_sector[38] == 0x29:
-            self.drive_number = boot_sector[36]
-            self.reserved_ebpb = boot_sector[37]
-            self.boot_signature = boot_sector[38]
-            self.volume_id = struct.unpack('<I', boot_sector[39:43])[0]
-            self.volume_label = boot_sector[43:54].decode('ascii', errors='ignore').rstrip()
-            self.fs_type_label = boot_sector[54:62].decode('ascii', errors='ignore').rstrip()
-        else:
-            self.drive_number = 0
-            self.reserved_ebpb = 0
-            self.boot_signature = boot_sector[38]
-            self.volume_id = 0
-            self.volume_label = "NO NAME"
-            self.fs_type_label = "FAT12"
+        self.drive_number = boot_sector[36]
+        self.reserved_ebpb = boot_sector[37]
+        self.boot_signature = boot_sector[38]
+        self.volume_id = struct.unpack('<I', boot_sector[39:43])[0]
+        self.volume_label = boot_sector[43:54].decode('ascii', errors='ignore').rstrip()
+        self.fs_type_label = boot_sector[54:62].decode('ascii', errors='ignore').rstrip()
 
         # Fixed Regions
         self.fat_start = self.reserved_sectors * self.bytes_per_sector
