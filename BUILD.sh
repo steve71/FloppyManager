@@ -33,14 +33,14 @@ if ! python3 -c "import PySide6; import PyInstaller" &> /dev/null; then
     echo "  Packages missing. Installing..."
     
     # Try installing to user site
-    python3 -m pip install PySide6 pyinstaller --user
+    python3 -m pip install -r requirements.txt --user
     
     if [ $? -ne 0 ]; then
         echo ""
         echo "  [!] Standard installation failed."
         echo "  Attempting with --break-system-packages (for managed environments)..."
         echo ""
-        python3 -m pip install PySide6 pyinstaller --break-system-packages --user
+        python3 -m pip install -r requirements.txt --break-system-packages --user
         
         if [ $? -ne 0 ]; then
              echo ""

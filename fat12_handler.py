@@ -101,7 +101,6 @@ class FAT12Image:
             'reserved_sectors': 1,
             'hidden_sectors': 0
         }
-        }
     }
 
     def __init__(self, image_path: str):

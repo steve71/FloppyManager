@@ -1,0 +1,3 @@
+PySide6>=6.8.0
+pyinstaller>=6.11.0
+pywin32-ctypes>=0.2.2; sys_platform == 'win32'

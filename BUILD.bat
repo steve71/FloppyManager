@@ -35,18 +35,18 @@ python -c "import PySide6; import PyInstaller; import win32ctypes" >nul 2>&1
 if errorlevel 1 (
     echo   Packages missing. Installing...
     echo   This may take a minute...
-    python -m pip install PySide6 pyinstaller pywin32-ctypes --quiet --disable-pip-version-check
+    python -m pip install -r requirements.txt --quiet --disable-pip-version-check
     if errorlevel 1 (
         echo.
         echo   Warning: Quick install failed, trying with verbose output...
         echo.
-        python -m pip install PySide6 pyinstaller pywin32-ctypes
+        python -m pip install -r requirements.txt
         if errorlevel 1 (
             echo.
             echo   [!] Standard installation failed.
             echo   Attempting with --break-system-packages ^(for managed environments^)...
             echo.
-            python -m pip install PySide6 pyinstaller pywin32-ctypes --break-system-packages
+            python -m pip install -r requirements.txt --break-system-packages
             if errorlevel 1 (
                 echo.
                 echo   [!] Installation failed or restricted.
