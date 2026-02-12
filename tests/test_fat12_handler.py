@@ -1321,3 +1321,28 @@ class TestFileAttributes:
         # Verify the file can still be read correctly
         assert len(entries) > 0
         assert entry['name'] == long_name
+
+    def test_directory_attributes(self, tmp_path):
+        """Test setting attributes on a directory"""
+        img_path = tmp_path / "test_dir_attr.img"
+        FAT12Image.create_empty_image(str(img_path))
+        handler = FAT12Image(str(img_path))
+        
+        # Create a directory
+        handler.create_directory("MYDIR")
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "MYDIR")
+        
+        assert entry['is_dir']
+        
+        # Set Hidden and System
+        assert handler.set_entry_attributes(entry, is_hidden=True, is_system=True)
+        
+        # Verify
+        entries = handler.read_root_directory()
+        entry = next(e for e in entries if e['name'] == "MYDIR")
+        
+        assert entry['is_hidden']
+        assert entry['is_system']
+        assert entry['is_dir'] # Should still be a directory
+        assert entry['attributes'] & 0x10 # Directory bit preserved

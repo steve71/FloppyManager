@@ -5,7 +5,16 @@
 
 """
 FAT12 Directory Operations
-Logic for handling directory entries, LFNs, and directory manipulation.
+
+This module provides low-level logic for handling FAT12 directory structures, including:
+- Reading and parsing directory entries (Root and Subdirectories).
+- Full VFAT Long Filename (LFN) support (reading, writing, checksums).
+- Creating, renaming, and deleting files and directories.
+- Managing directory cluster chains (expansion and cleanup).
+- Handling 8.3 short name generation and collision detection.
+- Modifying file attributes.
+
+It serves as the core directory manipulation layer used by the FAT12Image handler.
 """
 
 import struct
@@ -914,10 +923,11 @@ def set_entry_attributes(fs, entry: dict, is_read_only: bool = None,
                        is_archive: bool = None) -> bool:
     """
     Modify file attributes for a directory entry.
+    Reads current attributes from disk to ensure bits like Directory (0x10) are preserved.
     
     Args:
         fs: The FAT12Image filesystem object.
-        entry: Directory entry dictionary (must contain 'index' and 'attributes')
+        entry: Directory entry dictionary (must contain 'index' and 'parent_cluster')
         is_read_only: Set read-only flag (None = no change)
         is_hidden: Set hidden flag (None = no change)
         is_system: Set system flag (None = no change)
@@ -927,34 +937,43 @@ def set_entry_attributes(fs, entry: dict, is_read_only: bool = None,
         True if successful, False otherwise
     """
     try:
-        # Start with current attributes
-        current_attr = entry['attributes']
-        new_attr = current_attr
-        
-        # Modify flags as requested (only if not None)
-        if is_read_only is not None:
-            if is_read_only: new_attr |= 0x01
-            else: new_attr &= ~0x01
-        if is_hidden is not None:
-            if is_hidden: new_attr |= 0x02
-            else: new_attr &= ~0x02
-        if is_system is not None:
-            if is_system: new_attr |= 0x04
-            else: new_attr &= ~0x04
-        if is_archive is not None:
-            if is_archive: new_attr |= 0x20
-            else: new_attr &= ~0x20
-        
-        # Write the new attribute byte to disk
         with open(fs.image_path, 'r+b') as f:
             parent_cluster = entry.get('parent_cluster')
             offset = get_entry_offset(fs, parent_cluster, entry['index'])
             if offset == -1:
-                print(f"Error: Could not find offset for entry {entry['name']}")
+                print(f"Error: Could not find offset for entry {entry.get('name', 'Unknown')}")
                 return False
             
+            # Read current attributes from disk
             f.seek(offset + DIR_ATTR_OFFSET)
-            f.write(bytes([new_attr]))
+            current_attr_bytes = f.read(1)
+            if len(current_attr_bytes) != 1:
+                return False
+            
+            current_attr = current_attr_bytes[0]
+            new_attr = current_attr
+            
+            # Modify flags as requested (only if not None)
+            if is_read_only is not None:
+                if is_read_only: new_attr |= 0x01
+                else: new_attr &= ~0x01
+            if is_hidden is not None:
+                if is_hidden: new_attr |= 0x02
+                else: new_attr &= ~0x02
+            if is_system is not None:
+                if is_system: new_attr |= 0x04
+                else: new_attr &= ~0x04
+            if is_archive is not None:
+                if is_archive: new_attr |= 0x20
+                else: new_attr &= ~0x20
+            
+            # Write back if changed
+            if new_attr != current_attr:
+                f.seek(offset + DIR_ATTR_OFFSET)
+                f.write(bytes([new_attr]))
+                f.flush()
+                os.fsync(f.fileno())
+                
         return True
     except Exception as e:
         print(f"Error setting file attributes: {e}")
