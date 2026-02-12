@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 
 echo ""
 echo "============================="
-echo "  Floppy Manager"
+echo "  FloppyManager"
 echo "============================="
 echo ""
 
@@ -65,20 +65,20 @@ echo ""
 rm -rf build dist *.spec
 
 # Run PyInstaller
-python3 -m PyInstaller --clean --noconfirm Floppy_Manager.spec
+python3 -m PyInstaller --clean --noconfirm floppymanager.spec
 
 echo ""
 # Check if build succeeded
-if [ -f "dist/Floppy_Manager" ]; then
+if [ -f "dist/FloppyManager" ]; then
     echo "================================================================"
     echo "  SUCCESS - Build Complete!"
     echo "================================================================"
     echo ""
     echo "  Your executable is ready!"
-    echo "  Location: dist/Floppy_Manager"
+    echo "  Location: dist/FloppyManager"
     echo ""
     echo "  To run:"
-    echo "  ./dist/Floppy_Manager"
+    echo "  ./dist/FloppyManager"
     echo ""
 else
     echo "================================================================"

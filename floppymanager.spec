@@ -1,16 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
 
-# Determine executable name based on platform
-# Windows: "Floppy Manager.exe" (with space)
-# Linux/Mac: "Floppy_Manager" (with underscore)
-if sys.platform.startswith('win'):
-    exe_name = 'Floppy Manager'
-else:
-    exe_name = 'Floppy_Manager'
+exe_name = 'FloppyManager'
 
 a = Analysis(
-    ['floppy_manager.py'],
+    ['floppymanager.py'],
     pathex=[],
     binaries=[],
     datas=[('floppy_icon.ico', '.')],

@@ -4,7 +4,7 @@
 # MIT License
 
 """
-File Icon Helper for FAT12 Floppy Manager
+File Icon Helper for FAT12 FloppyManager
 Maps file extensions to appropriate Qt StandardPixmap icons
 """
 

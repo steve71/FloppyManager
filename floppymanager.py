@@ -97,7 +97,7 @@ class FloppyManagerWindow(QMainWindow):
 
     def setup_ui(self):
         """Create the user interface"""
-        self.setWindowTitle("Floppy Manager")
+        self.setWindowTitle("FloppyManager")
         self.setGeometry(400, 200, 620, 500)
 
         # Set window icon if available
@@ -741,7 +741,7 @@ class FloppyManagerWindow(QMainWindow):
         try:
             self.image = FAT12Image(filepath)
             self.image_path = filepath
-            self.setWindowTitle(f"Floppy Manager - {Path(filepath).name}")
+            self.setWindowTitle(f"FloppyManager - {Path(filepath).name}")
 
             # Save as last opened image
             self.settings.setValue('last_image_path', filepath)
@@ -752,7 +752,7 @@ class FloppyManagerWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to load image: {e}")
             self.image = None
             self.image_path = None
-            self.setWindowTitle("Floppy Manager")
+            self.setWindowTitle("FloppyManager")
 
     def on_search_text_changed(self, text):
         """Handle search text changes"""
@@ -1562,13 +1562,13 @@ class FloppyManagerWindow(QMainWindow):
         if self.image:
             self.image = None
             self.image_path = None
-            self.setWindowTitle("Floppy Manager")
+            self.setWindowTitle("FloppyManager")
             self.refresh_file_list()
             self.status_bar.showMessage("Image closed")
 
     def show_about(self):
         """Show about dialog"""
-        about_text = """<h2>Floppy Manager</h2>
+        about_text = """<h2>FloppyManager</h2>
 
         <p>A modern tool for managing files on FAT12 floppy disk images with VFAT long filename support.</p>
 
@@ -1857,7 +1857,7 @@ class FloppyManagerWindow(QMainWindow):
 def main():
     """Main entry point"""
     app = QApplication(sys.argv)
-    app.setApplicationName("Floppy Manager")
+    app.setApplicationName("FloppyManager")
     app.setOrganizationName("FloppyManager")
     # Set application style
     app.setStyle('Fusion')

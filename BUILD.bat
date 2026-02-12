@@ -4,7 +4,7 @@ REM Floppy Manager
 
 echo.
 echo =============================
-echo   Floppy Manager
+echo   FloppyManager
 echo =============================
 echo.
 
@@ -67,23 +67,23 @@ echo [3/3] Building executable...
 echo Please wait...
 echo.
 
-python -m PyInstaller --clean --noconfirm Floppy_Manager.spec
+python -m PyInstaller --clean --noconfirm floppymanager.spec
 
 echo.
 REM Check if build succeeded
-if exist "dist\Floppy Manager.exe" (
+if exist "dist\FloppyManager.exe" (
     echo ================================================================
     echo   SUCCESS - Build Complete!
     echo ================================================================
     echo.
     echo   Your executable is ready!
-    echo   Location: dist\Floppy Manager.exe
+    echo   Location: dist\FloppyManager.exe
     echo.
     echo   File size: ~30 MB (includes PySide6 runtime^)
     echo.
     echo   NEXT STEPS:
     echo   1. Open the "dist" folder
-    echo   2. Copy "Floppy Manager.exe" to your Desktop
+    echo   2. Copy "FloppyManager.exe" to your Desktop
     echo   3. Double-click to run
     echo   4. Right-click exe and Create shortcut (optional^)
     echo.
@@ -100,7 +100,7 @@ echo.
 echo   Please check error messages above.
 echo.
 echo   Common issues:
-echo   - Missing files (fat12_floppy_manager.py, fat12_handler.py)
+echo   - Missing files (floppymanager.py, fat12_handler.py)
 echo   - Antivirus blocking PyInstaller
 echo   - Insufficient disk space (need ~500 MB)
 echo.

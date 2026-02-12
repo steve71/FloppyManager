@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 
 echo ""
 echo "============================="
-echo "  Floppy Manager (Mac)"
+echo "  FloppyManager (Mac)"
 echo "============================="
 echo ""
 
@@ -69,11 +69,11 @@ echo ""
 rm -rf build dist *.spec
 
 # Run PyInstaller
-python3 -m PyInstaller --clean --noconfirm Floppy_Manager.spec
+python3 -m PyInstaller --clean --noconfirm floppymanager.spec
 
 echo ""
 # Check if build succeeded
-if [ -f "dist/Floppy_Manager" ]; then
+if [ -f "dist/FloppyManager" ]; then
     echo "SUCCESS! Executable is in the 'dist' folder."
 else
     echo "BUILD FAILED. Check messages above."
