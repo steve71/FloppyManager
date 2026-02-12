@@ -26,7 +26,7 @@ from fat12_directory import (
     create_directory, delete_directory, delete_directory_entry,
     get_entry_offset, predict_short_name, rename_entry,
     read_raw_directory_entries, find_free_root_entries, delete_entry,
-    find_entry_by_83_name, set_entry_attributes
+    find_entry_by_83_name, set_entry_attributes, FAT12Error
 )
 
 class FAT12Image:
@@ -403,7 +403,7 @@ class FAT12Image:
         # Find free clusters
         free_clusters = self.find_free_clusters(clusters_needed)
         if len(free_clusters) < clusters_needed:
-            return False
+            raise FAT12Error("Disk full (not enough free clusters)")
         
         # Get existing 8.3 names to avoid collisions
         existing_83_names = get_existing_83_names_in_directory(self, parent_cluster)
@@ -430,69 +430,66 @@ class FAT12Image:
         # Find free entries
         entry_index = find_free_directory_entries(self, parent_cluster, total_entries_needed)
         if entry_index == -1:
-            return False
+            raise FAT12Error("Disk full (directory entries exhausted)")
             
-        try:
-            # Create short directory entry
-            entry = bytearray(32)
-            entry[0:DIR_SHORT_NAME_LEN] = short_name_bytes
-            entry[DIR_ATTR_OFFSET] = 0x20  # Archive attribute
-            
-            # Set date/time (current)
-            now = datetime.datetime.now()
-            mod_dt = modification_dt if modification_dt is not None else now
-
-            creation_time = encode_fat_time(now)
-            creation_date = encode_fat_date(now)
-            modified_time = encode_fat_time(mod_dt)
-            modified_date = encode_fat_date(mod_dt)
-            
-            entry[DIR_CRT_TIME_TENTH_OFFSET] = 0  # Creation time tenth
-            entry[14:16] = struct.pack('<H', creation_time)
-            entry[16:18] = struct.pack('<H', creation_date)
-            entry[18:20] = struct.pack('<H', creation_date)  # Last access date
-            entry[DIR_LAST_MOD_TIME_OFFSET:DIR_LAST_MOD_TIME_OFFSET+2] = struct.pack('<H', modified_time)  # Last modified time
-            entry[24:26] = struct.pack('<H', modified_date)  # Last modified date
-            
-            if len(data) > 0:
-                entry[26:28] = struct.pack('<H', free_clusters[0])  # First cluster
-            else:
-                entry[26:28] = struct.pack('<H', 0)  # No cluster for empty files
-                
-            entry[28:32] = struct.pack('<I', len(data))  # File size
-            
-            # Write entries
-            write_directory_entries(self, parent_cluster, entry_index, lfn_entries, entry)
-            
-            # Write file data to clusters (if not empty)
-            if len(data) > 0:
-                offset = 0
-                fat_data = self.read_fat()
-                
-                with open(self.image_path, 'r+b') as f:
-                    for i, cluster in enumerate(free_clusters):
-                        # Write data
-                        cluster_offset = self.data_start + ((cluster - 2) * self.bytes_per_cluster)
-                        f.seek(cluster_offset)
-                        chunk = data[offset:offset + self.bytes_per_cluster]
-                        f.write(chunk)
-                        offset += len(chunk)
-                        
-                        # Update FAT
-                        if i < len(free_clusters) - 1:
-                            self.set_fat_entry(fat_data, cluster, free_clusters[i + 1])
-                        else:
-                            self.set_fat_entry(fat_data, cluster, 0xFFF)  # End of file
-                    
-                    f.flush()
-                    os.fsync(f.fileno())
-                
-                # Write FAT
-                self.write_fat(fat_data)
+        # Create short directory entry
+        entry = bytearray(32)
+        entry[0:DIR_SHORT_NAME_LEN] = short_name_bytes
+        entry[DIR_ATTR_OFFSET] = 0x20  # Archive attribute
         
-            return True
-        except Exception:
-            return False
+        # Set date/time (current)
+        now = datetime.datetime.now()
+        mod_dt = modification_dt if modification_dt is not None else now
+
+        creation_time = encode_fat_time(now)
+        creation_date = encode_fat_date(now)
+        modified_time = encode_fat_time(mod_dt)
+        modified_date = encode_fat_date(mod_dt)
+        
+        entry[DIR_CRT_TIME_TENTH_OFFSET] = 0  # Creation time tenth
+        entry[14:16] = struct.pack('<H', creation_time)
+        entry[16:18] = struct.pack('<H', creation_date)
+        entry[18:20] = struct.pack('<H', creation_date)  # Last access date
+        entry[DIR_LAST_MOD_TIME_OFFSET:DIR_LAST_MOD_TIME_OFFSET+2] = struct.pack('<H', modified_time)  # Last modified time
+        entry[24:26] = struct.pack('<H', modified_date)  # Last modified date
+        
+        if len(data) > 0:
+            entry[26:28] = struct.pack('<H', free_clusters[0])  # First cluster
+        else:
+            entry[26:28] = struct.pack('<H', 0)  # No cluster for empty files
+            
+        entry[28:32] = struct.pack('<I', len(data))  # File size
+        
+        # Write entries
+        write_directory_entries(self, parent_cluster, entry_index, lfn_entries, entry)
+        
+        # Write file data to clusters (if not empty)
+        if len(data) > 0:
+            offset = 0
+            fat_data = self.read_fat()
+            
+            with open(self.image_path, 'r+b') as f:
+                for i, cluster in enumerate(free_clusters):
+                    # Write data
+                    cluster_offset = self.data_start + ((cluster - 2) * self.bytes_per_cluster)
+                    f.seek(cluster_offset)
+                    chunk = data[offset:offset + self.bytes_per_cluster]
+                    f.write(chunk)
+                    offset += len(chunk)
+                    
+                    # Update FAT
+                    if i < len(free_clusters) - 1:
+                        self.set_fat_entry(fat_data, cluster, free_clusters[i + 1])
+                    else:
+                        self.set_fat_entry(fat_data, cluster, 0xFFF)  # End of file
+                
+                f.flush()
+                os.fsync(f.fileno())
+            
+            # Write FAT
+            self.write_fat(fat_data)
+    
+        return True
 
     def get_existing_83_names_in_directory(self, cluster: int = None) -> List[str]:
         """Get list of all existing 8.3 names in a directory"""

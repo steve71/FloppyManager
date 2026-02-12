@@ -30,6 +30,7 @@ from PySide6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, 
 
 # Import the FAT12 handler
 from fat12_handler import FAT12Image
+from fat12_directory import FAT12Error
 from gui_components import (
     BootSectorViewer, DirectoryViewer, FATViewer, FileAttributesDialog,
     SortableTreeWidgetItem, FileTreeWidget, RenameDelegate, FormatDialog,
@@ -1052,15 +1053,12 @@ class FloppyManagerWindow(QMainWindow):
                     self.image.delete_file(collision_entry)
 
                 # Write the new file
-                if self.image.write_file_to_image(original_name, data, self.use_numeric_tail, modification_dt, parent_cluster):
-                    success_count += 1
-                else:
-                    fail_count += 1
-                    QMessageBox.warning(
-                        self,
-                        "Error",
-                        f"Failed to write {original_name} - disk may be full"
-                    )
+                self.image.write_file_to_image(original_name, data, self.use_numeric_tail, modification_dt, parent_cluster)
+                success_count += 1
+
+            except FAT12Error as e:
+                fail_count += 1
+                QMessageBox.warning(self, "Error", f"Failed to write {Path(filepath).name}: {e}")
 
             except Exception as e:
                 fail_count += 1
@@ -1121,11 +1119,12 @@ class FloppyManagerWindow(QMainWindow):
                 QMessageBox.warning(self, "Invalid Name", f"Folder name cannot contain characters: {invalid_chars}")
                 return
 
-            if self.image.create_directory(name, parent_cluster, self.use_numeric_tail):
+            try:
+                self.image.create_directory(name, parent_cluster, self.use_numeric_tail)
                 self.refresh_file_list()
                 self.status_bar.showMessage(f"Created folder: {name}")
-            else:
-                QMessageBox.critical(self, "Error", "Failed to create directory.\nDisk may be full or name invalid.")
+            except FAT12Error as e:
+                QMessageBox.critical(self, "Error", f"Failed to create directory: {e}")
 
     def extract_selected(self):
         """Extract selected files"""
@@ -1293,15 +1292,17 @@ class FloppyManagerWindow(QMainWindow):
         # Proceed with deletion
         for entry in items_to_delete:
             if entry.get('is_dir'):
-                if self.image.delete_directory(entry, recursive=True):
+                try:
+                    self.image.delete_directory(entry, recursive=True)
                     success_count += 1
-                else:
-                    QMessageBox.critical(self, "Error", f"Failed to delete directory {entry['name']}")
+                except FAT12Error as e:
+                    QMessageBox.critical(self, "Error", f"Failed to delete directory {entry['name']}: {e}")
             else:
-                if self.image.delete_file(entry):
+                try:
+                    self.image.delete_file(entry)
                     success_count += 1
-                else:
-                    QMessageBox.critical(self, "Error", f"Failed to delete {entry['name']}")
+                except FAT12Error as e:
+                    QMessageBox.critical(self, "Error", f"Failed to delete {entry['name']}: {e}")
 
         self.refresh_file_list()
 
@@ -1347,11 +1348,11 @@ class FloppyManagerWindow(QMainWindow):
                 counter += 1
             
             # Write the new file
-            if self.image.write_file_to_image(new_name, data, self.use_numeric_tail, None, parent_cluster):
-                self.refresh_file_list()
-                self.status_bar.showMessage(f"Copied: {new_name}")
-            else:
-                QMessageBox.warning(self, "Error", "Failed to copy file. Disk may be full.")
+            self.image.write_file_to_image(new_name, data, self.use_numeric_tail, None, parent_cluster)
+            self.refresh_file_list()
+            self.status_bar.showMessage(f"Copied: {new_name}")
+        except FAT12Error as e:
+            QMessageBox.warning(self, "Error", f"Failed to copy file: {e}")
                 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to copy file: {e}")
@@ -1394,8 +1395,11 @@ class FloppyManagerWindow(QMainWindow):
 
         success_count = 0
         for entry in files_to_delete:
-            if self.image.delete_file(entry):
+            try:
+                self.image.delete_file(entry)
                 success_count += 1
+            except FAT12Error:
+                pass # Skip failed deletions in bulk op
 
         self.refresh_file_list()
         if success_count > 0:
@@ -1761,22 +1765,21 @@ class FloppyManagerWindow(QMainWindow):
             attrs = dialog.get_attributes()
             
             # Update the attributes
-            success = self.image.set_entry_attributes(
-                entry,
-                is_read_only=attrs['is_read_only'],
-                is_hidden=attrs['is_hidden'],
-                is_system=attrs['is_system'],
-                is_archive=attrs['is_archive']
-            )
-            
-            if success:
+            try:
+                self.image.set_entry_attributes(
+                    entry,
+                    is_read_only=attrs['is_read_only'],
+                    is_hidden=attrs['is_hidden'],
+                    is_system=attrs['is_system'],
+                    is_archive=attrs['is_archive']
+                )
                 self.status_bar.showMessage(f"Attributes updated for {entry['name']}", 3000)
                 self.refresh_file_list()
-            else:
+            except FAT12Error as e:
                 QMessageBox.critical(
                     self,
                     "Error",
-                    f"Failed to update attributes for {entry['name']}"
+                    f"Failed to update attributes for {entry['name']}: {e}"
                 )
     
     def on_item_changed(self, item, column):
@@ -1833,18 +1836,16 @@ class FloppyManagerWindow(QMainWindow):
                 return
             
             # Attempt the rename
-            success = self.image.rename_entry(entry, new_name, self.use_numeric_tail)
-            
-            if success:
+            try:
+                self.image.rename_entry(entry, new_name, self.use_numeric_tail)
                 self.status_bar.showMessage(f"Renamed '{old_name}' to '{new_name}'")
                 # Refresh the file list to show the new name and short name
                 self.refresh_file_list()
-            else:
+            except FAT12Error as e:
                 QMessageBox.critical(
                     self,
                     "Rename Failed",
-                    f"Could not rename '{old_name}' to '{new_name}'.\n\n"
-                    "The root directory may be full or another error occurred."
+                    f"Could not rename '{old_name}' to '{new_name}'.\n\n{e}"
                 )
                 # Temporarily disconnect to avoid recursion
                 self.table.itemChanged.disconnect(self.on_item_changed)

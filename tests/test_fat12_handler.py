@@ -4,6 +4,7 @@ import struct
 from unittest.mock import patch
 from fat12_handler import FAT12Image
 from vfat_utils import decode_fat_date, decode_fat_time, calculate_lfn_checksum
+from fat12_directory import FAT12Error
 
 @pytest.fixture
 def handler():
@@ -158,7 +159,8 @@ class TestClusterManagement:
         handler.write_fat(fat_data)
         
         # Try to write a file (should fail as no clusters are free)
-        assert not handler.write_file_to_image("fail.txt", b"data")
+        with pytest.raises(FAT12Error):
+            handler.write_file_to_image("fail.txt", b"data")
 
     def test_format_disk(self, tmp_path):
         img_path = tmp_path / "test_format.img"
@@ -305,7 +307,8 @@ class TestFileIO:
         
         # 2MB data (disk is 1.44MB)
         data = b"A" * (2 * 1024 * 1024)
-        assert not handler.write_file_to_image("huge.bin", data)
+        with pytest.raises(FAT12Error):
+            handler.write_file_to_image("huge.bin", data)
 
     def test_delete_file(self, tmp_path):
         img_path = tmp_path / "test_del.img"
@@ -446,7 +449,8 @@ class TestDirectoryOperations:
         last_file_entry = entries[-1]
         
         # Try to rename to a long name, which requires more than one slot. This should fail.
-        assert not handler.rename_entry(last_file_entry, "ThisIsALongName.txt")
+        with pytest.raises(FAT12Error):
+            handler.rename_entry(last_file_entry, "ThisIsALongName.txt")
 
     def test_lfn_case_preservation(self, tmp_path):
         img_path = tmp_path / "test_case.img"
@@ -486,8 +490,8 @@ class TestDirectoryOperations:
         
         # Mock open to raise exception during rename
         with patch('builtins.open', side_effect=IOError("Mock error")):
-            result = handler.rename_entry(entries[0], "new.txt")
-            assert result is False
+            with pytest.raises(IOError):
+                handler.rename_entry(entries[0], "new.txt")
 
     def test_lfn_cleanup_on_delete(self, tmp_path):
         img_path = tmp_path / "test_lfn_del.img"
@@ -522,8 +526,8 @@ class TestDirectoryOperations:
         entries = handler.read_root_directory()
         
         with patch('builtins.open', side_effect=IOError("Mock error")):
-            result = handler.delete_file(entries[0])
-            assert result is False
+            with pytest.raises(IOError):
+                handler.delete_file(entries[0])
 
     def test_lfn_checksum_mismatch(self, tmp_path):
         img_path = tmp_path / "test_checksum.img"
@@ -730,7 +734,8 @@ class TestDirectoryOperations:
             assert handler.write_file_to_image(fname, b"")
             
         # Try to write one more
-        assert not handler.write_file_to_image("FULL.TXT", b"")
+        with pytest.raises(FAT12Error):
+            handler.write_file_to_image("FULL.TXT", b"")
 
     def test_directory_fragmentation_reuse(self, tmp_path):
         img_path = tmp_path / "test_frag.img"

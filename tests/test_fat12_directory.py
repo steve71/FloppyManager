@@ -3,7 +3,7 @@ from fat12_handler import FAT12Image
 from fat12_directory import (
     iter_directory_entries, get_entry_offset, 
     get_existing_83_names_in_directory, find_free_directory_entries,
-    free_cluster_chain
+    free_cluster_chain, FAT12Error
 )
 
 @pytest.fixture
@@ -49,7 +49,8 @@ class TestDirectoryDeletion:
         image.write_file_to_image("FILE.TXT", b"data", parent_cluster=entry['cluster'])
         
         # Should fail without recursive=True
-        assert not image.delete_directory(entry)
+        with pytest.raises(FAT12Error):
+            image.delete_directory(entry)
 
     def test_delete_recursive(self, image):
         image.create_directory("RECURSIVE")

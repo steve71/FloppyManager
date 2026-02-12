@@ -32,6 +32,10 @@ from vfat_utils import (
     DIR_LAST_MOD_TIME_OFFSET
 )
 
+class FAT12Error(Exception):
+    """Base exception for FAT12 filesystem errors"""
+    pass
+
 def iter_directory_entries(fs, cluster: int = None):
     """
     Iterates through all 32-byte directory entries in a given directory.
@@ -565,8 +569,7 @@ def create_directory(fs, dir_name: str, parent_cluster: int = None, use_numeric_
     # Check for LFN collision
     entries = read_directory(fs, parent_cluster)
     if any(e['name'].lower() == dir_name.lower() for e in entries):
-        print(f"Error: Directory '{dir_name}' already exists")
-        return False
+        raise FAT12Error(f"Directory '{dir_name}' already exists")
 
     existing_names = get_existing_83_names_in_directory(fs, parent_cluster)
     short_name_83 = generate_83_name(dir_name, existing_names, use_numeric_tail)
@@ -583,12 +586,12 @@ def create_directory(fs, dir_name: str, parent_cluster: int = None, use_numeric_
     
     free_clusters = fs.find_free_clusters(1)
     if not free_clusters:
-        return False
+        raise FAT12Error("Disk full (no free clusters)")
     dir_cluster = free_clusters[0]
     
     entry_index = find_free_directory_entries(fs, parent_cluster, total_entries)
     if entry_index == -1:
-        return False
+        raise FAT12Error("Disk full (root directory entries exhausted)")
         
     fat_data = fs.read_fat()
     fs.set_fat_entry(fat_data, dir_cluster, 0xFFF)
@@ -604,7 +607,7 @@ def create_directory(fs, dir_name: str, parent_cluster: int = None, use_numeric_
     
     return True
 
-def delete_directory_entry(fs, parent_cluster: int, entry_index: int) -> bool:
+def delete_directory_entry(fs, parent_cluster: int, entry_index: int):
     """
     Marks a directory entry and its associated LFN entries as deleted.
 
@@ -617,45 +620,40 @@ def delete_directory_entry(fs, parent_cluster: int, entry_index: int) -> bool:
         parent_cluster: The cluster of the directory containing the entry.
         entry_index: The index of the short filename entry to delete.
 
-    Returns:
-        True on success, False on failure (e.g., invalid index).
+    Raises:
+        FAT12Error: If the entry cannot be found or written.
     """
-    try:
-        # Only read FAT if we are in a subdirectory
-        fat_data = None
-        if parent_cluster is not None and parent_cluster != 0:
-            fat_data = fs.read_fat()
+    # Only read FAT if we are in a subdirectory
+    fat_data = None
+    if parent_cluster is not None and parent_cluster != 0:
+        fat_data = fs.read_fat()
+        
+    with open(fs.image_path, 'r+b') as f:
+        # Mark the short entry as deleted
+        offset = get_entry_offset(fs, parent_cluster, entry_index, fat_data)
+        if offset == -1:
+            raise FAT12Error(f"Could not calculate offset for entry index {entry_index}")
             
-        with open(fs.image_path, 'r+b') as f:
-            # Mark the short entry as deleted
-            offset = get_entry_offset(fs, parent_cluster, entry_index, fat_data)
-            if offset == -1:
-                return False
-                
+        f.seek(offset)
+        f.write(b'\xE5')
+        
+        # Look backwards for LFN entries
+        index = entry_index - 1
+        while index >= 0:
+            offset = get_entry_offset(fs, parent_cluster, index, fat_data)
+            if offset == -1: break
             f.seek(offset)
-            f.write(b'\xE5')
+            entry_data = f.read(32)
             
-            # Look backwards for LFN entries
-            index = entry_index - 1
-            while index >= 0:
-                offset = get_entry_offset(fs, parent_cluster, index, fat_data)
-                if offset == -1: break
+            if entry_data and entry_data[DIR_ATTR_OFFSET] == 0x0F:
                 f.seek(offset)
-                entry_data = f.read(32)
-                
-                if entry_data and entry_data[DIR_ATTR_OFFSET] == 0x0F:
-                    f.seek(offset)
-                    f.write(b'\xE5')
-                    index -= 1
-                else:
-                    break
-            
-            f.flush()
-            os.fsync(f.fileno())
-        return True
-    except Exception as e:
-        print(f"Error deleting directory entry: {e}")
-        return False
+                f.write(b'\xE5')
+                index -= 1
+            else:
+                break
+        
+        f.flush()
+        os.fsync(f.fileno())
 
 def free_cluster_chain(fs, start_cluster: int):
     """Frees a chain of clusters starting from start_cluster."""
@@ -690,54 +688,38 @@ def delete_directory(fs, entry: dict, recursive: bool = False) -> bool:
     Returns:
         True on success, False on failure.
     """
-    try:
-        # Check if it's actually a directory
-        if not entry.get('is_dir', False):
-            print("Error: Entry is not a directory")
-            return False
-        
-        # Read directory contents (skip . and ..)
-        dir_entries = read_directory(fs, entry['cluster'])
-        real_entries = [e for e in dir_entries if e['name'] not in ('.', '..')]
-        
-        # Check if directory is empty
-        if len(real_entries) > 0 and not recursive:
-            print("Error: Directory is not empty (use recursive=True to force)")
-            return False
-        
-        # If recursive, delete all contents first
-        if recursive and len(real_entries) > 0:
-            for sub_entry in real_entries:
-                if sub_entry['is_dir']:
-                    if not delete_directory(fs, sub_entry, recursive=True):
-                        return False
-                else:
-                    if not delete_entry(fs, sub_entry):
-                        return False
-        
-        # Delete the directory entry itself and free clusters
-        return delete_entry(fs, entry)
-        
-    except Exception as e:
-        print(f"Error deleting directory: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    # Check if it's actually a directory
+    if not entry.get('is_dir', False):
+        raise FAT12Error(f"Entry '{entry.get('name')}' is not a directory")
+    
+    # Read directory contents (skip . and ..)
+    dir_entries = read_directory(fs, entry['cluster'])
+    real_entries = [e for e in dir_entries if e['name'] not in ('.', '..')]
+    
+    # Check if directory is empty
+    if len(real_entries) > 0 and not recursive:
+        raise FAT12Error(f"Directory '{entry['name']}' is not empty")
+    
+    # If recursive, delete all contents first
+    if recursive and len(real_entries) > 0:
+        for sub_entry in real_entries:
+            if sub_entry['is_dir']:
+                delete_directory(fs, sub_entry, recursive=True)
+            else:
+                delete_entry(fs, sub_entry)
+    
+    # Delete the directory entry itself and free clusters
+    return delete_entry(fs, entry)
 
-def delete_entry(fs, entry: dict) -> bool:
+def delete_entry(fs, entry: dict):
     """Delete a directory entry (file or directory) and free its clusters"""
-    try:
-        # Mark entry as deleted
-        if not delete_directory_entry(fs, entry.get('parent_cluster'), entry['index']):
-            return False
-        
-        # Free clusters in FAT
-        free_cluster_chain(fs, entry['cluster'])
-        
-        return True
-    except Exception as e:
-        print(f"Error deleting entry: {e}")
-        return False
+    # Mark entry as deleted
+    delete_directory_entry(fs, entry.get('parent_cluster'), entry['index'])
+    
+    # Free clusters in FAT
+    free_cluster_chain(fs, entry['cluster'])
+    
+    return True
 
 def rename_entry(fs, entry: dict, new_name: str, use_numeric_tail: bool = False) -> bool:
     """
@@ -762,128 +744,119 @@ def rename_entry(fs, entry: dict, new_name: str, use_numeric_tail: bool = False)
     Returns:
         True on success, False on failure (e.g., name collision, directory full).
     """
+    # Prepare New Names
+    parent_cluster = entry.get('parent_cluster')
+    parent_cluster = None if parent_cluster == 0 else parent_cluster
+    
+    # Check for LFN collision with other files
+    entries = read_directory(fs, parent_cluster)
+    if any(e['name'].lower() == new_name.lower() and e['index'] != entry['index'] for e in entries):
+        raise FAT12Error(f"Entry '{new_name}' already exists")
+        
+    existing_names = get_existing_83_names_in_directory(fs, parent_cluster)
+
+    with open(fs.image_path, 'rb') as f:
+        f.seek(get_entry_offset(fs, parent_cluster, entry['index']))
+        current_raw = f.read(DIR_SHORT_NAME_LEN)
+        current_name_11 = decode_raw_83_name(current_raw).upper()
+
+    if current_name_11 in existing_names:
+        existing_names.remove(current_name_11)
+
+    # Generate and format new 8.3 name (11 bytes raw)
+    short_name_11 = generate_83_name(new_name, existing_names, use_numeric_tail)
+    
     try:
-        # Prepare New Names
-        parent_cluster = entry.get('parent_cluster')
-        parent_cluster = None if parent_cluster == 0 else parent_cluster
-        
-        # Check for LFN collision with other files
-        entries = read_directory(fs, parent_cluster)
-        if any(e['name'].lower() == new_name.lower() and e['index'] != entry['index'] for e in entries):
-            print(f"Error: Entry '{new_name}' already exists")
-            return False
-            
-        existing_names = get_existing_83_names_in_directory(fs, parent_cluster)
+        raw_short_name = short_name_11.encode('ascii')[:DIR_SHORT_NAME_LEN]
+    except UnicodeEncodeError:
+        raw_short_name = short_name_11.encode('ascii', 'ignore').ljust(DIR_SHORT_NAME_LEN, b' ')[:DIR_SHORT_NAME_LEN]
 
-        with open(fs.image_path, 'rb') as f:
-            f.seek(get_entry_offset(fs, parent_cluster, entry['index']))
-            current_raw = f.read(DIR_SHORT_NAME_LEN)
-            current_name_11 = decode_raw_83_name(current_raw).upper()
+    # Generate LFN entries if needed
+    base = short_name_11[:8].strip()
+    ext = short_name_11[8:].strip()
+    simple_name = f"{base}.{ext}" if ext else base
 
-        if current_name_11 in existing_names:
-            existing_names.remove(current_name_11)
+    needs_lfn = (new_name != simple_name) or (len(new_name) > 12)
+    new_lfn_entries = []
+    if needs_lfn:
+        new_lfn_entries = create_lfn_entries(new_name, raw_short_name)
 
-        # Generate and format new 8.3 name (11 bytes raw)
-        short_name_11 = generate_83_name(new_name, existing_names, use_numeric_tail)
-        
-        try:
-            raw_short_name = short_name_11.encode('ascii')[:DIR_SHORT_NAME_LEN]
-        except UnicodeEncodeError:
-            raw_short_name = short_name_11.encode('ascii', 'ignore').ljust(DIR_SHORT_NAME_LEN, b' ')[:DIR_SHORT_NAME_LEN]
+    total_new_slots = len(new_lfn_entries) + 1
 
-        # Generate LFN entries if needed
-        base = short_name_11[:8].strip()
-        ext = short_name_11[8:].strip()
-        simple_name = f"{base}.{ext}" if ext else base
-
-        needs_lfn = (new_name != simple_name) or (len(new_name) > 12)
-        new_lfn_entries = []
-        if needs_lfn:
-            new_lfn_entries = create_lfn_entries(new_name, raw_short_name)
-
-        total_new_slots = len(new_lfn_entries) + 1
-
-        # Analyze Current Location
-        old_lfn_indices = []
-        idx = entry['index'] - 1
-        fat_data = fs.read_fat()
-        
-        with open(fs.image_path, 'rb') as f:
-            while idx >= 0:
-                offset = get_entry_offset(fs, parent_cluster, idx, fat_data)
-                if offset == -1: break
-                f.seek(offset)
-                data = f.read(32)
-                if data[DIR_ATTR_OFFSET] == 0x0F: # Attribute 0x0F is LFN
-                    old_lfn_indices.append(idx)
-                    idx -= 1
-                else:
-                    break
-
-        current_start_index = old_lfn_indices[-1] if old_lfn_indices else entry['index']
-        total_old_slots = len(old_lfn_indices) + 1
-
-        # Read original metadata (Cluster, Size, Dates) to preserve it
-        with open(fs.image_path, 'rb') as f:
-            f.seek(get_entry_offset(fs, parent_cluster, entry['index'], fat_data))
-            original_entry_data = bytearray(f.read(32))
-        
-        # Determine Write Location
-        write_start_index = -1
-        slots_to_delete = []
-
-        if total_new_slots <= total_old_slots:
-            # CASE A: Fits in current location
-            write_start_index = current_start_index
-            # Delete only the extra slots we no longer need
-            slots_to_delete = range(current_start_index + total_new_slots, current_start_index + total_old_slots)
-        else:
-            # CASE B: Needs more space -> Find new contiguous block
-            write_start_index = find_free_directory_entries(fs, parent_cluster, total_new_slots)
-
-            if write_start_index == -1:
-                print("Error: Disk full (root directory entries exhausted)")
-                return False
-
-            # We are moving, so delete ALL old slots
-            slots_to_delete = range(current_start_index, current_start_index + total_old_slots)
-
-        # Execute Write
-        with open(fs.image_path, 'r+b') as f:
-            # Mark old/unused slots as deleted (0xE5)
-            for i in slots_to_delete:
-                offset = get_entry_offset(fs, parent_cluster, i, fat_data)
-                f.seek(offset)
-                f.write(b'\xE5')
-            f.flush()
-            os.fsync(f.fileno())
-
-            # Write New LFN Entries
-            for i, lfn_data in enumerate(new_lfn_entries):
-                offset = get_entry_offset(fs, parent_cluster, write_start_index + i, fat_data)
-                f.seek(offset)
-                f.write(lfn_data)
-            f.flush()
-            os.fsync(f.fileno())
-
-            # Write New Short Entry
-            new_short_entry = original_entry_data
-            new_short_entry[0:DIR_SHORT_NAME_LEN] = raw_short_name # Update 8.3 name
-
-            short_entry_idx = write_start_index + len(new_lfn_entries)
-            offset = get_entry_offset(fs, parent_cluster, short_entry_idx, fat_data)
+    # Analyze Current Location
+    old_lfn_indices = []
+    idx = entry['index'] - 1
+    fat_data = fs.read_fat()
+    
+    with open(fs.image_path, 'rb') as f:
+        while idx >= 0:
+            offset = get_entry_offset(fs, parent_cluster, idx, fat_data)
+            if offset == -1: break
             f.seek(offset)
-            f.write(new_short_entry)
-            f.flush()
-            os.fsync(f.fileno())
+            data = f.read(32)
+            if data[DIR_ATTR_OFFSET] == 0x0F: # Attribute 0x0F is LFN
+                old_lfn_indices.append(idx)
+                idx -= 1
+            else:
+                break
 
-        return True
+    current_start_index = old_lfn_indices[-1] if old_lfn_indices else entry['index']
+    total_old_slots = len(old_lfn_indices) + 1
 
-    except Exception as e:
-        print(f"Rename Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    # Read original metadata (Cluster, Size, Dates) to preserve it
+    with open(fs.image_path, 'rb') as f:
+        f.seek(get_entry_offset(fs, parent_cluster, entry['index'], fat_data))
+        original_entry_data = bytearray(f.read(32))
+    
+    # Determine Write Location
+    write_start_index = -1
+    slots_to_delete = []
+
+    if total_new_slots <= total_old_slots:
+        # CASE A: Fits in current location
+        write_start_index = current_start_index
+        # Delete only the extra slots we no longer need
+        slots_to_delete = range(current_start_index + total_new_slots, current_start_index + total_old_slots)
+    else:
+        # CASE B: Needs more space -> Find new contiguous block
+        write_start_index = find_free_directory_entries(fs, parent_cluster, total_new_slots)
+
+        if write_start_index == -1:
+            raise FAT12Error("Disk full (directory entries exhausted)")
+
+        # We are moving, so delete ALL old slots
+        slots_to_delete = range(current_start_index, current_start_index + total_old_slots)
+
+    # Execute Write
+    with open(fs.image_path, 'r+b') as f:
+        # Mark old/unused slots as deleted (0xE5)
+        for i in slots_to_delete:
+            offset = get_entry_offset(fs, parent_cluster, i, fat_data)
+            f.seek(offset)
+            f.write(b'\xE5')
+        f.flush()
+        os.fsync(f.fileno())
+
+        # Write New LFN Entries
+        for i, lfn_data in enumerate(new_lfn_entries):
+            offset = get_entry_offset(fs, parent_cluster, write_start_index + i, fat_data)
+            f.seek(offset)
+            f.write(lfn_data)
+        f.flush()
+        os.fsync(f.fileno())
+
+        # Write New Short Entry
+        new_short_entry = original_entry_data
+        new_short_entry[0:DIR_SHORT_NAME_LEN] = raw_short_name # Update 8.3 name
+
+        short_entry_idx = write_start_index + len(new_lfn_entries)
+        offset = get_entry_offset(fs, parent_cluster, short_entry_idx, fat_data)
+        f.seek(offset)
+        f.write(new_short_entry)
+        f.flush()
+        os.fsync(f.fileno())
+
+    return True
 
 def predict_short_name(fs, long_name: str, use_numeric_tail: bool = False, parent_cluster: int = None) -> str:
     """
@@ -936,45 +909,40 @@ def set_entry_attributes(fs, entry: dict, is_read_only: bool = None,
     Returns:
         True if successful, False otherwise
     """
-    try:
-        with open(fs.image_path, 'r+b') as f:
-            parent_cluster = entry.get('parent_cluster')
-            offset = get_entry_offset(fs, parent_cluster, entry['index'])
-            if offset == -1:
-                print(f"Error: Could not find offset for entry {entry.get('name', 'Unknown')}")
-                return False
-            
-            # Read current attributes from disk
+    with open(fs.image_path, 'r+b') as f:
+        parent_cluster = entry.get('parent_cluster')
+        offset = get_entry_offset(fs, parent_cluster, entry['index'])
+        if offset == -1:
+            raise FAT12Error(f"Could not find offset for entry {entry.get('name', 'Unknown')}")
+        
+        # Read current attributes from disk
+        f.seek(offset + DIR_ATTR_OFFSET)
+        current_attr_bytes = f.read(1)
+        if len(current_attr_bytes) != 1:
+            raise FAT12Error("Failed to read attributes from disk")
+        
+        current_attr = current_attr_bytes[0]
+        new_attr = current_attr
+        
+        # Modify flags as requested (only if not None)
+        if is_read_only is not None:
+            if is_read_only: new_attr |= 0x01
+            else: new_attr &= ~0x01
+        if is_hidden is not None:
+            if is_hidden: new_attr |= 0x02
+            else: new_attr &= ~0x02
+        if is_system is not None:
+            if is_system: new_attr |= 0x04
+            else: new_attr &= ~0x04
+        if is_archive is not None:
+            if is_archive: new_attr |= 0x20
+            else: new_attr &= ~0x20
+        
+        # Write back if changed
+        if new_attr != current_attr:
             f.seek(offset + DIR_ATTR_OFFSET)
-            current_attr_bytes = f.read(1)
-            if len(current_attr_bytes) != 1:
-                return False
+            f.write(bytes([new_attr]))
+            f.flush()
+            os.fsync(f.fileno())
             
-            current_attr = current_attr_bytes[0]
-            new_attr = current_attr
-            
-            # Modify flags as requested (only if not None)
-            if is_read_only is not None:
-                if is_read_only: new_attr |= 0x01
-                else: new_attr &= ~0x01
-            if is_hidden is not None:
-                if is_hidden: new_attr |= 0x02
-                else: new_attr &= ~0x02
-            if is_system is not None:
-                if is_system: new_attr |= 0x04
-                else: new_attr &= ~0x04
-            if is_archive is not None:
-                if is_archive: new_attr |= 0x20
-                else: new_attr &= ~0x20
-            
-            # Write back if changed
-            if new_attr != current_attr:
-                f.seek(offset + DIR_ATTR_OFFSET)
-                f.write(bytes([new_attr]))
-                f.flush()
-                os.fsync(f.fileno())
-                
-        return True
-    except Exception as e:
-        print(f"Error setting file attributes: {e}")
-        return False
+    return True
