@@ -1730,6 +1730,7 @@ class FloppyManagerWindow(QMainWindow):
 
         <p><b>Keyboard Shortcuts:</b></p>
         <ul>
+        <li>Ctrl+A - Select all</li>
         <li>Ctrl+N - Create new image</li>
         <li>Ctrl+O - Open image</li>
         <li>Ctrl+W - Close image</li>
