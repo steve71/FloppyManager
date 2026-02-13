@@ -184,7 +184,11 @@ class FAT12Image:
         """Calculate the size on disk (allocated space) for a given file size"""
         if size_bytes == 0:
             return 0
-        clusters = (size_bytes + self.bytes_per_cluster - 1) // self.bytes_per_cluster
+        
+        clusters, remainder = divmod(size_bytes, self.bytes_per_cluster)
+        if remainder > 0:
+            clusters += 1
+            
         return clusters * self.bytes_per_cluster
 
     def classify_cluster(self, value: int) -> str:
