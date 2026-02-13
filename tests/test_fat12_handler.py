@@ -11,6 +11,12 @@ def handler():
     # Create instance without running full __init__ to test methods in isolation
     return FAT12Image.__new__(FAT12Image)
 
+@pytest.fixture
+def handler(tmp_path):
+    img_path = tmp_path / "test.img"
+    FAT12Image.create_empty_image(str(img_path))
+    return FAT12Image(str(img_path))
+
 class TestInitialization:
     def test_fat12_bit_packing(self, handler):
         # FAT12 stores two 12-bit entries (1.5 bytes each) across 3 bytes
@@ -41,14 +47,8 @@ class TestInitialization:
         assert handler.get_fat_entry(fat_buffer, 2) == 0x000
         assert handler.get_fat_entry(fat_buffer, 3) == 0xFFF
 
-    def test_boot_sector_initialization(self, tmp_path):
-        # Create a temporary blank image
-        img_path = tmp_path / "test.img"
-        # Use the class method to create a default image
-        FAT12Image.create_empty_image(str(img_path))
-        
-        # Load it and verify the OEM Name from the snippet
-        handler = FAT12Image(str(img_path))
+    def test_boot_sector_initialization(self, handler):
+        # Verify the OEM Name from the snippet
         assert "MSDOS5.0" in handler.oem_name
         assert handler.bytes_per_cluster == 512
         assert handler.sectors_per_cluster == 1
@@ -107,22 +107,14 @@ class TestInitialization:
         assert handler.fat_type == 'FAT32'
 
 class TestClusterManagement:
-    def test_find_free_clusters(self, tmp_path):
-        img_path = tmp_path / "test_clusters.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_find_free_clusters(self, handler):
         # Request 5 free clusters
         free_clusters = handler.find_free_clusters(5)
         assert len(free_clusters) == 5
         # Clusters start at 2
         assert free_clusters == [2, 3, 4, 5, 6]
 
-    def test_find_all_free_clusters(self, tmp_path):
-        img_path = tmp_path / "test_all_clusters.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_find_all_free_clusters(self, handler):
         # Mark a few clusters as used
         fat = handler.read_fat()
         handler.set_fat_entry(fat, 10, 0xFFF)
@@ -139,11 +131,7 @@ class TestClusterManagement:
         assert 20 not in all_free
         assert 2 in all_free
 
-    def test_disk_full_data_area(self, tmp_path):
-        img_path = tmp_path / "test_full_disk.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_disk_full_data_area(self, handler):
         # Manually fill the FAT to simulate full disk
         fat_data = handler.read_fat()
         
@@ -162,11 +150,7 @@ class TestClusterManagement:
         with pytest.raises(FAT12Error):
             handler.write_file_to_image("fail.txt", b"data")
 
-    def test_format_disk(self, tmp_path):
-        img_path = tmp_path / "test_format.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_format_disk(self, handler):
         handler.write_file_to_image("file1.txt", b"data")
         handler.write_file_to_image("file2.txt", b"data")
         
@@ -179,11 +163,7 @@ class TestClusterManagement:
         fat = handler.read_fat()
         assert handler.get_fat_entry(fat, 2) == 0
 
-    def test_format_disk_cleans_fat_and_root(self, tmp_path):
-        img_path = tmp_path / "test_format_clean.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_format_disk_cleans_fat_and_root(self, handler):
         # Fill up some clusters
         handler.write_file_to_image("file1.txt", b"A" * 2048) # 4 clusters
         
@@ -205,7 +185,7 @@ class TestClusterManagement:
         assert all(b == 0 for b in fat_after[3:])
         
         # Verify Root Directory is zeroed
-        with open(str(img_path), 'rb') as f:
+        with open(handler.image_path, 'rb') as f:
             f.seek(handler.root_start)
             root_data = f.read(handler.root_size)
             assert all(b == 0 for b in root_data)
@@ -214,7 +194,7 @@ class TestClusterManagement:
         fat_size = handler.sectors_per_fat * handler.bytes_per_sector
         fat2_start = handler.fat_start + fat_size
         
-        with open(str(img_path), 'rb') as f:
+        with open(handler.image_path, 'rb') as f:
             f.seek(fat2_start)
             fat2_data = f.read(fat_size)
             
@@ -224,11 +204,7 @@ class TestClusterManagement:
             assert all(b == 0 for b in fat2_data[3:])
 
 class TestFileIO:
-    def test_write_and_read_file(self, tmp_path):
-        img_path = tmp_path / "test_io.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_write_and_read_file(self, handler):
         content = b"Hello FAT12 World"
         filename = "hello.txt"
         
@@ -246,11 +222,7 @@ class TestFileIO:
         extracted = handler.extract_file(entry)
         assert extracted == content
 
-    def test_write_and_read_multicluster_file(self, tmp_path):
-        img_path = tmp_path / "test_mc.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_write_and_read_multicluster_file(self, handler):
         # Create content larger than one cluster (512 bytes)
         content = b"A" * 600
         filename = "largefile.bin"
@@ -269,11 +241,7 @@ class TestFileIO:
         extracted = handler.extract_file(entry)
         assert extracted == content
 
-    def test_write_zero_byte_file(self, tmp_path):
-        img_path = tmp_path / "test_zero.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_write_zero_byte_file(self, handler):
         assert handler.write_file_to_image("empty.txt", b"")
         
         entries = handler.read_root_directory()
@@ -284,11 +252,7 @@ class TestFileIO:
         # Extracting should return empty bytes
         assert handler.extract_file(entries[0]) == b""
 
-    def test_write_exact_sector_size(self, tmp_path):
-        img_path = tmp_path / "test_exact.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_write_exact_sector_size(self, handler):
         # 512 bytes = exactly 1 sector/cluster
         data = b"X" * 512
         handler.write_file_to_image("exact.txt", data)
@@ -300,21 +264,13 @@ class TestFileIO:
         assert len(extracted) == 512
         assert extracted == data
 
-    def test_file_too_large_for_disk(self, tmp_path):
-        img_path = tmp_path / "test_large.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_file_too_large_for_disk(self, handler):
         # 2MB data (disk is 1.44MB)
         data = b"A" * (2 * 1024 * 1024)
         with pytest.raises(FAT12Error):
             handler.write_file_to_image("huge.bin", data)
 
-    def test_delete_file(self, tmp_path):
-        img_path = tmp_path / "test_del.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_delete_file(self, handler):
         handler.write_file_to_image("delete_me.txt", b"some data")
         entries = handler.read_root_directory()
         assert len(entries) == 1
@@ -324,11 +280,7 @@ class TestFileIO:
         entries_after = handler.read_root_directory()
         assert len(entries_after) == 0
 
-    def test_delete_reclaims_clusters(self, tmp_path):
-        img_path = tmp_path / "test_reclaim.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_delete_reclaims_clusters(self, handler):
         # Write 1KB file (2 clusters)
         data = b"A" * 1024
         handler.write_file_to_image("file.bin", data)
@@ -347,11 +299,7 @@ class TestFileIO:
         fat = handler.read_fat()
         assert handler.get_fat_entry(fat, cluster) == 0
 
-    def test_extract_corrupted_chain(self, tmp_path):
-        img_path = tmp_path / "test_corrupt.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_extract_corrupted_chain(self, handler):
         # Write 2 clusters
         data = b"A" * 1024
         handler.write_file_to_image("file.txt", data)
@@ -369,11 +317,7 @@ class TestFileIO:
             handler.extract_file(entries[0])
 
 class TestDirectoryOperations:
-    def test_rename_file(self, tmp_path):
-        img_path = tmp_path / "test_rename.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_rename_file(self, handler):
         handler.write_file_to_image("old_name.txt", b"content")
         entries = handler.read_root_directory()
         
@@ -385,11 +329,7 @@ class TestDirectoryOperations:
         # Check 8.3 generation happened
         assert entries_new[0]['short_name'] == "NEW_NAME.TXT"
 
-    def test_rename_file_lfn_expansion(self, tmp_path):
-        img_path = tmp_path / "test_rename_lfn.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_rename_file_lfn_expansion(self, handler):
         # Short name file
         handler.write_file_to_image("SHORT.TXT", b"data")
         entries = handler.read_root_directory()
@@ -402,11 +342,7 @@ class TestDirectoryOperations:
         assert entries[0]['name'] == long_name
         assert entries[0]['short_name'] == "THISIS~1.TXT"
 
-    def test_rename_shrink_lfn_to_short(self, tmp_path):
-        img_path = tmp_path / "test_shrink.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_rename_shrink_lfn_to_short(self, handler):
         # Write Long Filename (e.g. "LongFile.txt" -> LFN + Short = 2 entries)
         long_name = "LongFile.txt"
         handler.write_file_to_image(long_name, b"content")
@@ -426,18 +362,14 @@ class TestDirectoryOperations:
         # The file originally occupied [LFN, Short]. 
         # After rename to short, it occupies [Short, Deleted].
         # The new short entry overwrites the old LFN slot (start of block).
-        with open(str(img_path), 'rb') as f:
+        with open(handler.image_path, 'rb') as f:
             # Check the slot immediately following the new file
             # The new file should be at original_index - 1 (start of the block)
             f.seek(handler.root_start + (original_index * 32)) 
             byte = f.read(1)
             assert byte == b'\xE5'
 
-    def test_rename_expand_fail_full_dir(self, tmp_path):
-        img_path = tmp_path / "test_rename_full.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_rename_expand_fail_full_dir(self, handler):
         # Fill the directory, leaving no contiguous space for an LFN entry
         for i in range(224):
             handler.write_file_to_image(f"F{i}.TXT", b"")
@@ -449,11 +381,7 @@ class TestDirectoryOperations:
         with pytest.raises(FAT12Error):
             handler.rename_entry(last_file_entry, "ThisIsALongName.txt")
 
-    def test_lfn_case_preservation(self, tmp_path):
-        img_path = tmp_path / "test_case.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_lfn_case_preservation(self, handler):
         filename = "MixCase.txt"
         handler.write_file_to_image(filename, b"content")
         
@@ -462,11 +390,7 @@ class TestDirectoryOperations:
         # Short name should be uppercase
         assert entries[0]['short_name'] == "MIXCASE.TXT"
 
-    def test_rename_file_unicode_error(self, tmp_path):
-        img_path = tmp_path / "test_rename_uni.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_rename_file_unicode_error(self, handler):
         handler.write_file_to_image("old.txt", b"")
         entries = handler.read_root_directory()
         
@@ -478,10 +402,7 @@ class TestDirectoryOperations:
         # 'Ï' is dropped by 'ignore', resulting in "FLE    TXT " (padded)
         assert "FLE" in entries[0]['short_name']
 
-    def test_rename_file_exception(self, tmp_path):
-        img_path = tmp_path / "test_rename_exc.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
+    def test_rename_file_exception(self, handler):
         handler.write_file_to_image("file.txt", b"")
         entries = handler.read_root_directory()
         
@@ -490,11 +411,7 @@ class TestDirectoryOperations:
             with pytest.raises(IOError):
                 handler.rename_entry(entries[0], "new.txt")
 
-    def test_lfn_cleanup_on_delete(self, tmp_path):
-        img_path = tmp_path / "test_lfn_del.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_lfn_cleanup_on_delete(self, handler):
         # Write file with long name (needs LFN entries)
         long_name = "ThisIsALongName.txt"
         handler.write_file_to_image(long_name, b"content")
@@ -506,7 +423,7 @@ class TestDirectoryOperations:
         handler.delete_file(target)
         
         # Verify raw entries are marked 0xE5 (Deleted)
-        with open(str(img_path), 'rb') as f:
+        with open(handler.image_path, 'rb') as f:
             f.seek(handler.root_start)
             # "ThisIsALongName.txt" is 19 chars -> 2 LFN entries + 1 Short entry = 3 entries
             # All 3 should be marked with 0xE5 at the start
@@ -515,10 +432,7 @@ class TestDirectoryOperations:
                 assert byte == b'\xE5'
                 f.seek(31, 1) # Skip rest of entry
 
-    def test_delete_file_exception(self, tmp_path):
-        img_path = tmp_path / "test_delete_exc.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
+    def test_delete_file_exception(self, handler):
         handler.write_file_to_image("file.txt", b"")
         entries = handler.read_root_directory()
         
@@ -526,11 +440,7 @@ class TestDirectoryOperations:
             with pytest.raises(IOError):
                 handler.delete_file(entries[0])
 
-    def test_lfn_checksum_mismatch(self, tmp_path):
-        img_path = tmp_path / "test_checksum.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_lfn_checksum_mismatch(self, handler):
         filename = "ChecksumTest.txt"
         handler.write_file_to_image(filename, b"data")
         
@@ -541,7 +451,7 @@ class TestDirectoryOperations:
         # Manually corrupt the checksum in the LFN entry
         # LFN entries are written before the short entry.
         # For this length, there is 1 LFN entry at index 0, Short entry at index 1.
-        with open(str(img_path), 'r+b') as f:
+        with open(handler.image_path, 'r+b') as f:
             f.seek(handler.root_start)
             
             # Read LFN entry (Index 0)
@@ -563,16 +473,12 @@ class TestDirectoryOperations:
         assert entries[0]['name'] == entries[0]['short_name']
         assert "CHECKS" in entries[0]['name'] # Short name base
 
-    def test_orphaned_lfn_entries(self, tmp_path):
-        img_path = tmp_path / "test_orphan.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_orphaned_lfn_entries(self, handler):
         # Manually write an LFN entry followed by a non-matching file
         # LFN entry (Seq 0x41, Checksum 0x99)
         lfn_entry = b'\x41\x41\x00\x41\x00\x41\x00\x41\x00\x41\x00\x0F\x00\x99\x41\x00\x41\x00\x41\x00\x41\x00\x41\x00\x41\x00\x00\x00\x41\x00\x41\x00'
         
-        with open(str(img_path), 'r+b') as f:
+        with open(handler.image_path, 'r+b') as f:
             f.seek(handler.root_start)
             f.write(lfn_entry)
             
@@ -584,12 +490,7 @@ class TestDirectoryOperations:
         # Should not pick up the garbage LFN because checksum mismatch
         assert entries[0]['name'] == "OTHER.TXT"
 
-    def test_read_root_directory_fat32(self, tmp_path):
-        # Test reading high cluster bits when FAT32 is detected
-        img_path = tmp_path / "test_fat32_read.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_read_root_directory_fat32(self, handler):
         # Force FAT32 type
         handler.fat_type = 'FAT32'
         
@@ -602,7 +503,7 @@ class TestDirectoryOperations:
         entry[26:28] = struct.pack('<H', 0x5678) # Low
         
         # Write to root dir
-        with open(str(img_path), 'r+b') as f:
+        with open(handler.image_path, 'r+b') as f:
             f.seek(handler.root_start)
             f.write(entry)
             
@@ -610,12 +511,7 @@ class TestDirectoryOperations:
         assert len(entries) == 1
         assert entries[0]['cluster'] == 0x12345678
 
-    def test_rename_case_change_no_tail(self, tmp_path):
-        # Verify that renaming a file to change case doesn't generate a numeric tail
-        img_path = tmp_path / "test_rename_case.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_rename_case_change_no_tail(self, handler):
         handler.write_file_to_image("FILE.TXT", b"content")
         entries = handler.read_root_directory()
         assert entries[0]['short_name'] == "FILE.TXT"
@@ -628,11 +524,7 @@ class TestDirectoryOperations:
         assert entries[0]['name'] == "File.txt"
         assert entries[0]['short_name'] == "FILE.TXT" # Should NOT be FILE~1.TXT
 
-    def test_shift_jis_e5_handling(self, tmp_path):
-        img_path = tmp_path / "test_sjis.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_shift_jis_e5_handling(self, handler):
         # In Shift-JIS, a filename starting with 0xE5 must be stored as 0x05
         # to avoid being confused with a deleted entry. We test this by manually
         # writing such an entry and ensuring it's read back correctly.
@@ -651,7 +543,7 @@ class TestDirectoryOperations:
         entry_data[28:32] = struct.pack('<I', 4) # size
         
         # 3. Write it to the disk image
-        with open(str(img_path), 'r+b') as f:
+        with open(handler.image_path, 'r+b') as f:
             f.seek(handler.root_start + (free_entry_idx * 32))
             f.write(entry_data)
             
@@ -664,13 +556,9 @@ class TestDirectoryOperations:
         # rest of the name proves the file was not skipped as "deleted".
         assert entries[0]['short_name'] == "FILENAM.TXT"
 
-    def test_volume_label_skip(self, tmp_path):
-        img_path = tmp_path / "test_vol.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_volume_label_skip(self, handler):
         # Manually write a volume label entry (Attr 0x08)
-        with open(str(img_path), 'r+b') as f:
+        with open(handler.image_path, 'r+b') as f:
             f.seek(handler.root_start)
             # "MYLABEL    " + attr 0x08
             entry = b"MYLABEL    \x08" + b"\x00"*20
@@ -680,11 +568,7 @@ class TestDirectoryOperations:
         entries = handler.read_root_directory()
         assert len(entries) == 0
 
-    def test_read_raw_directory_entries(self, tmp_path):
-        img_path = tmp_path / "test_raw.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_read_raw_directory_entries(self, handler):
         handler.write_file_to_image("FILE1.TXT", b"1")
         
         raw_entries = handler.read_raw_directory_entries()
@@ -699,11 +583,7 @@ class TestDirectoryOperations:
         assert idx == 1
         assert data[0] == 0x00
 
-    def test_file_timestamps(self, tmp_path):
-        img_path = tmp_path / "test_time.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_file_timestamps(self, handler):
         before = datetime.datetime.now()
         handler.write_file_to_image("timed.txt", b"data")
         after = datetime.datetime.now()
@@ -719,11 +599,7 @@ class TestDirectoryOperations:
         # Check if the created time is between 'before' and 'after', allowing for 2s precision loss
         assert (before - datetime.timedelta(seconds=2)) <= created_dt <= (after + datetime.timedelta(seconds=2))
 
-    def test_root_directory_full(self, tmp_path):
-        img_path = tmp_path / "test_full_root.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_root_directory_full(self, handler):
         # Fill root directory (224 entries)
         # We use short names to ensure 1 entry per file
         for i in range(224):
@@ -734,11 +610,7 @@ class TestDirectoryOperations:
         with pytest.raises(FAT12Error):
             handler.write_file_to_image("FULL.TXT", b"")
 
-    def test_directory_fragmentation_reuse(self, tmp_path):
-        img_path = tmp_path / "test_frag.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_directory_fragmentation_reuse(self, handler):
         # Write 3 short files (1 entry each)
         handler.write_file_to_image("FILE1.TXT", b"1")
         handler.write_file_to_image("FILE2.TXT", b"2")
@@ -761,11 +633,7 @@ class TestDirectoryOperations:
         assert file4['index'] == file2['index']
 
 class TestClusterAnalysis:
-    def test_get_cluster_map(self, tmp_path):
-        img_path = tmp_path / "test_map.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_get_cluster_map(self, handler):
         # Write a file that takes 2 clusters (512 bytes per cluster)
         # 600 bytes -> 2 clusters
         handler.write_file_to_image("file1.txt", b"A" * 600)
@@ -786,11 +654,7 @@ class TestClusterAnalysis:
         # Check size
         assert len(cluster_map) == 3
 
-    def test_get_cluster_chain(self, tmp_path):
-        img_path = tmp_path / "test_chain.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_get_cluster_chain(self, handler):
         # Write a file that takes 3 clusters
         # 1200 bytes -> 3 clusters (512 * 2 = 1024, need 3rd)
         handler.write_file_to_image("chain.txt", b"C" * 1200)
@@ -815,11 +679,7 @@ class TestClusterAnalysis:
         chain = handler.get_cluster_chain(5)
         assert chain == [5]
 
-    def test_get_cluster_chain_fragmented(self, tmp_path):
-        img_path = tmp_path / "test_frag_chain.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_get_cluster_chain_fragmented(self, handler):
         # Create fragmentation
         # Write file A (1 cluster) -> 2
         handler.write_file_to_image("A.txt", b"A" * 100)
@@ -845,11 +705,7 @@ class TestClusterAnalysis:
         chain = handler.get_cluster_chain(5)
         assert chain == [3, 5]
 
-    def test_lfn_invalid_utf16(self, tmp_path):
-        img_path = tmp_path / "test_bad_lfn.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_lfn_invalid_utf16(self, handler):
         # 1. Manually write a malformed LFN entry at Index 0
         # LFN entry with invalid UTF-16 sequence
         lfn_entry = bytearray(32)
@@ -860,7 +716,7 @@ class TestClusterAnalysis:
         # This ensures strict decoding fails
         lfn_entry[1:5] = b'\x00\xD8\x20\x00' 
         
-        with open(str(img_path), 'r+b') as f:
+        with open(handler.image_path, 'r+b') as f:
             f.seek(handler.root_start)
             f.write(lfn_entry)
             
@@ -874,18 +730,11 @@ class TestClusterAnalysis:
         assert entries[0]['name'] == "BADLFN.TXT"
 
 class TestHelperMethods:
-    def test_get_total_capacity(self, tmp_path):
-        img_path = tmp_path / "test_cap.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
+    def test_get_total_capacity(self, handler):
         # 2880 sectors * 512 bytes = 1,474,560 bytes
         assert handler.get_total_capacity() == 1474560
 
-    def test_get_free_space(self, tmp_path):
-        img_path = tmp_path / "test_free.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_get_free_space(self, handler):
         # Initial free space: 2847 clusters * 512 bytes
         initial_free = 2847 * 512
         assert handler.get_free_space() == initial_free
@@ -896,11 +745,7 @@ class TestHelperMethods:
         # Should decrease by 2 clusters
         assert handler.get_free_space() == initial_free - 1024
 
-    def test_calculate_size_on_disk(self, tmp_path):
-        img_path = tmp_path / "test_ondisk.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_calculate_size_on_disk(self, handler):
         # Cluster size is 512 bytes for 1.44MB image
         assert handler.bytes_per_cluster == 512
         
@@ -913,11 +758,7 @@ class TestHelperMethods:
         # 513 bytes -> 2 clusters (1024)
         assert handler.calculate_size_on_disk(513) == 1024
 
-    def test_find_entry_by_83_name(self, tmp_path):
-        img_path = tmp_path / "test_find.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_find_entry_by_83_name(self, handler):
         handler.write_file_to_image("FILE.TXT", b"content")
         handler.write_file_to_image("NOEXT", b"content")
         
@@ -944,11 +785,7 @@ class TestHelperMethods:
         entry = handler.find_entry_by_83_name("NONEXIST   ")
         assert entry is None
 
-    def test_get_existing_83_names(self, tmp_path):
-        img_path = tmp_path / "test_existing.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_get_existing_83_names(self, handler):
         handler.write_file_to_image("A.TXT", b"")
         handler.write_file_to_image("LONGFILENAME.TXT", b"", use_numeric_tail=True) # LONGFILENAME.TXT -> LONGFI~1.TXT -> LONGFI~1TXT
         
@@ -957,11 +794,7 @@ class TestHelperMethods:
         assert "LONGFI~1TXT" in names
         assert len(names) == 2
 
-    def test_get_fat_entry_count(self, tmp_path):
-        img_path = tmp_path / "test_fat_count.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_get_fat_entry_count(self, handler):
         # Sectors per FAT = 9
         # Bytes per sector = 512
         # Total bytes = 4608
@@ -978,11 +811,7 @@ class TestHelperMethods:
         assert handler.classify_cluster(0xFF8) == FAT12Image.CLUSTER_EOF
         assert handler.classify_cluster(0xFFF) == FAT12Image.CLUSTER_EOF
 
-    def test_predict_short_name(self, tmp_path):
-        img_path = tmp_path / "test_predict.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_predict_short_name(self, handler):
         # Write a file to occupy a name
         handler.write_file_to_image("FILE.TXT", b"")
         
@@ -990,29 +819,21 @@ class TestHelperMethods:
         assert handler.predict_short_name("File.txt", use_numeric_tail=True) == "FILE~1  TXT"
         assert handler.predict_short_name("NewFile.txt") == "NEWFILE TXT"
 
-    def test_get_total_cluster_count(self, tmp_path):
-        img_path = tmp_path / "test_cluster_count.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_get_total_cluster_count(self, handler):
         # Standard 1.44MB floppy
         # FAT size = 9 sectors * 512 bytes = 4608 bytes
         # Entries = (4608 * 8) / 12 = 3072
         # Result should be min(3072, 4084) = 3072
         assert handler.get_total_cluster_count() == 3072
 
-    def test_get_existing_83_names_filtering(self, tmp_path):
-        img_path = tmp_path / "test_filter.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_get_existing_83_names_filtering(self, handler):
         # 1. Write a file and delete it (marks as 0xE5)
         handler.write_file_to_image("DEL.TXT", b"")
         entries = handler.read_root_directory()
         handler.delete_file(entries[0])
         
         # 2. Manually write a file with 0x05 (Shift-JIS 0xE5) at index 1
-        with open(str(img_path), 'r+b') as f:
+        with open(handler.image_path, 'r+b') as f:
             f.seek(handler.root_start + 32) # Index 1
             entry = bytearray(32)
             entry[0] = 0x05
@@ -1026,11 +847,7 @@ class TestHelperMethods:
         assert "\uFFFDEST    TXT" in names
         assert len(names) == 1
 
-    def test_find_entry_by_83_name_raw_match(self, tmp_path):
-        img_path = tmp_path / "test_find_raw.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_find_entry_by_83_name_raw_match(self, handler):
         handler.write_file_to_image("FILE.TXT", b"")
         
         # Search using the raw 11-byte format
@@ -1038,16 +855,12 @@ class TestHelperMethods:
         assert entry is not None
         assert entry['raw_short_name'] == "FILE    TXT"
 
-    def test_predict_short_name_collision_sjis(self, tmp_path):
-        img_path = tmp_path / "test_predict_sjis.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
-        
+    def test_predict_short_name_collision_sjis(self, handler):
         # If we have a file "\xE5BCDEFGH.TXT" (stored as 0x05 + BCDEFGHTXT), it decodes to "BCDEFGHTXT"
         # If we try to add "BCDEFGH.TXT" (candidate "BCDEFGH TXT"), it should NOT collide because names differ.
         
         # Manually write the 0x05 entry
-        with open(str(img_path), 'r+b') as f:
+        with open(handler.image_path, 'r+b') as f:
             f.seek(handler.root_start)
             entry = bytearray(32)
             entry[0] = 0x05
@@ -1060,11 +873,8 @@ class TestHelperMethods:
 class TestFileAttributes:
     """Test file attribute modification functionality"""
     
-    def test_set_read_only_attribute(self, tmp_path):
+    def test_set_read_only_attribute(self, handler):
         """Test setting read-only attribute"""
-        img_path = tmp_path / "test.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
         
         # Add a test file
         test_data = b"Test file content"
@@ -1098,11 +908,8 @@ class TestFileAttributes:
         assert not (entry['attributes'] & 0x01)  # Read-only bit cleared
         assert entry['attributes'] & 0x20  # Archive bit still set
     
-    def test_set_hidden_attribute(self, tmp_path):
+    def test_set_hidden_attribute(self, handler):
         """Test setting hidden attribute"""
-        img_path = tmp_path / "test.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
         
         # Add a test file
         test_data = b"Test file content"
@@ -1133,11 +940,8 @@ class TestFileAttributes:
         assert not entry['is_hidden']
         assert not (entry['attributes'] & 0x02)  # Hidden bit cleared
     
-    def test_set_system_attribute(self, tmp_path):
+    def test_set_system_attribute(self, handler):
         """Test setting system attribute"""
-        img_path = tmp_path / "test.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
         
         # Add a test file
         test_data = b"Test file content"
@@ -1159,11 +963,8 @@ class TestFileAttributes:
         assert entry['is_system']
         assert entry['attributes'] & 0x04  # System bit set
     
-    def test_set_archive_attribute(self, tmp_path):
+    def test_set_archive_attribute(self, handler):
         """Test setting archive attribute"""
-        img_path = tmp_path / "test.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
         
         # Add a test file
         test_data = b"Test file content"
@@ -1194,11 +995,8 @@ class TestFileAttributes:
         assert entry['is_archive']
         assert entry['attributes'] & 0x20  # Archive bit set
     
-    def test_set_multiple_attributes(self, tmp_path):
+    def test_set_multiple_attributes(self, handler):
         """Test setting multiple attributes at once"""
-        img_path = tmp_path / "test.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
         
         # Add a test file
         test_data = b"Test file content"
@@ -1228,11 +1026,8 @@ class TestFileAttributes:
         expected_attr = 0x01 | 0x02 | 0x04 | 0x20  # R+H+S+A
         assert entry['attributes'] == expected_attr
     
-    def test_partial_attribute_update(self, tmp_path):
+    def test_partial_attribute_update(self, handler):
         """Test updating only some attributes (None means no change)"""
-        img_path = tmp_path / "test.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
         
         # Add a test file
         test_data = b"Test file content"
@@ -1258,11 +1053,8 @@ class TestFileAttributes:
         assert not entry['is_archive']
         assert not entry['is_system']
     
-    def test_attribute_bits_preserved(self, tmp_path):
+    def test_attribute_bits_preserved(self, handler):
         """Test that directory bit (0x10) is preserved and can't be modified"""
-        img_path = tmp_path / "test.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
         
         # Add a test file
         test_data = b"Test file content"
@@ -1285,11 +1077,8 @@ class TestFileAttributes:
         assert not (entry['attributes'] & 0x10)  # Still not a directory
         assert not entry['is_dir']  # is_dir flag should be False
     
-    def test_attributes_with_long_filename(self, tmp_path):
+    def test_attributes_with_long_filename(self, handler):
         """Test that attributes work correctly with files that have LFN entries"""
-        img_path = tmp_path / "test.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
         
         # Add a file with a long name that needs LFN entries
         test_data = b"Test file content"
@@ -1324,11 +1113,8 @@ class TestFileAttributes:
         assert len(entries) > 0
         assert entry['name'] == long_name
 
-    def test_directory_attributes(self, tmp_path):
+    def test_directory_attributes(self, handler):
         """Test setting attributes on a directory"""
-        img_path = tmp_path / "test_dir_attr.img"
-        FAT12Image.create_empty_image(str(img_path))
-        handler = FAT12Image(str(img_path))
         
         # Create a directory
         handler.create_directory("MYDIR")
