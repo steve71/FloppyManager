@@ -12,6 +12,7 @@ import os
 import struct
 import datetime
 import random
+import logging
 from pathlib import Path
 from typing import List, Optional
 
@@ -28,6 +29,8 @@ from fat12_directory import (
     read_raw_directory_entries, find_free_root_entries, delete_entry,
     find_entry_by_83_name, set_entry_attributes, FAT12Error, FAT12CorruptionError
 )
+
+logger = logging.getLogger(__name__)
 
 class FAT12Image:
     """Handler for FAT12 floppy disk images"""
@@ -105,6 +108,7 @@ class FAT12Image:
 
     def __init__(self, image_path: str):
         self.image_path = image_path
+        logger.debug(f"Initializing FAT12Image with {image_path}")
         self.load_boot_sector()
         
     def load_boot_sector(self):
@@ -117,37 +121,45 @@ class FAT12Image:
         with open(self.image_path, 'rb') as f:
             boot_sector = f.read(512)
             
-        # Parse BPB (BIOS Parameter Block)
-        self.oem_name = boot_sector[3:11].decode('ascii', errors='ignore').rstrip()
-        self.bytes_per_sector = struct.unpack('<H', boot_sector[11:13])[0]
-        self.sectors_per_cluster = boot_sector[13]
-        self.reserved_sectors = struct.unpack('<H', boot_sector[14:16])[0]
-        self.num_fats = boot_sector[16]
-        self.root_entries = struct.unpack('<H', boot_sector[17:19])[0]
-        total_sectors_short = struct.unpack('<H', boot_sector[19:21])[0]
+        if len(boot_sector) < 512:
+            logger.critical(f"Image file too small: {len(boot_sector)} bytes")
+            raise FAT12Error("Image file too small to contain boot sector")
 
-        self.media_descriptor = boot_sector[21]
+        try:
+            # Parse BPB (BIOS Parameter Block)
+            self.oem_name = boot_sector[3:11].decode('ascii', errors='ignore').rstrip()
+            self.bytes_per_sector = struct.unpack('<H', boot_sector[11:13])[0]
+            self.sectors_per_cluster = boot_sector[13]
+            self.reserved_sectors = struct.unpack('<H', boot_sector[14:16])[0]
+            self.num_fats = boot_sector[16]
+            self.root_entries = struct.unpack('<H', boot_sector[17:19])[0]
+            total_sectors_short = struct.unpack('<H', boot_sector[19:21])[0]
 
-        self.sectors_per_fat = struct.unpack('<H', boot_sector[22:24])[0]
+            self.media_descriptor = boot_sector[21]
 
-        self.sectors_per_track = struct.unpack('<H', boot_sector[24:26])[0]
-        self.number_of_heads = struct.unpack('<H', boot_sector[26:28])[0]
-        self.hidden_sectors = struct.unpack('<I', boot_sector[28:32])[0]
+            self.sectors_per_fat = struct.unpack('<H', boot_sector[22:24])[0]
 
-        if total_sectors_short != 0:
-            self.total_sectors = total_sectors_short
-        else:
-            self.total_sectors = struct.unpack('<I', boot_sector[32:36])[0]
+            self.sectors_per_track = struct.unpack('<H', boot_sector[24:26])[0]
+            self.number_of_heads = struct.unpack('<H', boot_sector[26:28])[0]
+            self.hidden_sectors = struct.unpack('<I', boot_sector[28:32])[0]
 
-        # Parse Extended BPB
-        self.drive_number = boot_sector[36]
-        self.reserved_ebpb = boot_sector[37]
-        self.boot_signature = boot_sector[38]
-        self.volume_id = struct.unpack('<I', boot_sector[39:43])[0]
-        self.volume_label = boot_sector[43:54].decode('ascii', errors='ignore').rstrip()
-        self.fs_type_label = boot_sector[54:62].decode('ascii', errors='ignore').rstrip()
+            if total_sectors_short != 0:
+                self.total_sectors = total_sectors_short
+            else:
+                self.total_sectors = struct.unpack('<I', boot_sector[32:36])[0]
 
-        # Fixed Regions
+            # Parse Extended BPB
+            self.drive_number = boot_sector[36]
+            self.reserved_ebpb = boot_sector[37]
+            self.boot_signature = boot_sector[38]
+            self.volume_id = struct.unpack('<I', boot_sector[39:43])[0]
+            self.volume_label = boot_sector[43:54].decode('ascii', errors='ignore').rstrip()
+            self.fs_type_label = boot_sector[54:62].decode('ascii', errors='ignore').rstrip()
+        except struct.error as e:
+            logger.critical(f"Failed to parse boot sector: {e}")
+            raise FAT12Error(f"Invalid boot sector format: {e}")
+
+        # Fixed Regions (Calculations)
         self.fat_start = self.reserved_sectors * self.bytes_per_sector
         fat_region_size = self.num_fats * self.sectors_per_fat * self.bytes_per_sector
         self.root_start = self.fat_start + fat_region_size
@@ -168,6 +180,8 @@ class FAT12Image:
         else:
             self.fat_type = 'FAT32'
         
+        logger.debug(f"Loaded boot sector: {self.fat_type}, {self.total_sectors} sectors, {self.bytes_per_cluster} bytes/cluster")
+
     def get_total_capacity(self) -> int:
         """
         Get total disk capacity in bytes.
@@ -532,6 +546,8 @@ class FAT12Image:
         Raises:
             FAT12Error: If disk is full or other FS errors.
         """
+        logger.info(f"Writing file '{filename}' ({len(data)} bytes)")
+        
         # Calculate clusters needed
         clusters_needed = (len(data) + self.bytes_per_cluster - 1) // self.bytes_per_cluster
         if clusters_needed == 0:
@@ -540,6 +556,7 @@ class FAT12Image:
         # Find free clusters
         free_clusters = self.find_free_clusters(clusters_needed)
         if len(free_clusters) < clusters_needed:
+            logger.warning(f"Disk full: needed {clusters_needed} clusters, found {len(free_clusters)}")
             raise FAT12Error("Disk full (not enough free clusters)")
         
         # Get existing 8.3 names to avoid collisions
@@ -654,6 +671,7 @@ class FAT12Image:
         Raises:
             FAT12Error: If directory exists or disk is full.
         """
+        logger.info(f"Creating directory '{dir_name}'")
         create_directory(self, dir_name, parent_cluster, use_numeric_tail)
 
     def find_free_root_entries(self, required_slots: int) -> int:
@@ -669,6 +687,7 @@ class FAT12Image:
         Raises:
             FAT12Error: If name exists or disk is full.
         """
+        logger.info(f"Renaming entry to '{new_name}'")
         rename_entry(self, entry, new_name, use_numeric_tail)
 
     def delete_file(self, entry: dict):
@@ -676,6 +695,7 @@ class FAT12Image:
         Raises:
             FAT12Error: If file cannot be deleted.
         """
+        logger.info(f"Deleting file '{entry.get('name')}'")
         delete_entry(self, entry)
     
     def delete_directory(self, entry: dict, recursive: bool = False):
@@ -686,6 +706,7 @@ class FAT12Image:
         Raises:
             FAT12Error: If directory is not empty (and recursive=False).
         """
+        logger.info(f"Deleting directory '{entry.get('name')}' (recursive={recursive})")
         delete_directory(self, entry, recursive)
 
     def delete_directory_entry(self, parent_cluster: int, entry_index: int):
@@ -852,6 +873,8 @@ class FAT12Image:
         Args:
             full_format: If True, also zero out the data area (slower but more secure)
         """
+        logger.info(f"Formatting disk (Full: {full_format})")
+        
         with open(self.image_path, 'r+b') as f:
             # Clear root directory
             f.seek(self.root_start)
@@ -902,6 +925,8 @@ class FAT12Image:
         formatting the disk, and writing them back contiguously.
         Preserves attributes and timestamps.
         """
+        logger.info("Starting filesystem defragmentation")
+        
         # 1. Collect all items recursively
         all_items = [] # List of (parent_path_tuple, entry_dict)
         files_data = {} # Map id(entry) -> bytes
@@ -920,6 +945,7 @@ class FAT12Image:
         
         collect(None, ())
         
+        logger.info(f"Collected {len(all_items)} items. Formatting disk...")
         # 2. Format (Quick format preserves BPB but clears FAT/Root)
         self.format_disk(full_format=False)
         
@@ -930,6 +956,7 @@ class FAT12Image:
         # Sort by path length (parents first) then name (alphabetical sort)
         all_items.sort(key=lambda x: (len(x[0]), x[1]['name']))
         
+        logger.info("Restoring files and directories...")
         for parent_path, entry in all_items:
             parent_cluster = path_to_cluster[parent_path]
             
@@ -967,3 +994,5 @@ class FAT12Image:
                 f.seek(offset + DIR_LAST_MOD_TIME_OFFSET)
                 f.write(struct.pack('<H', entry['last_modified_time']))
                 f.write(struct.pack('<H', entry['last_modified_date']))
+        
+        logger.info("Defragmentation complete")

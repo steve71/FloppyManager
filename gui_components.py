@@ -4,6 +4,7 @@
 import os
 import shutil
 import tempfile
+import logging
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -11,15 +12,17 @@ from PySide6.QtWidgets import (
     QTabWidget, QHeaderView, QPushButton, QLabel, QGridLayout,
     QWidget, QScrollArea, QSizePolicy, QSpinBox, QFrame, QApplication,
     QTreeWidget, QTreeWidgetItem, QStyledItemDelegate, QLineEdit, QComboBox,
-    QRadioButton, QDialogButtonBox, QMessageBox
+    QRadioButton, QDialogButtonBox, QMessageBox, QTextEdit
 )
 from PySide6.QtCore import Qt, QSize, QTimer, QMimeData, QUrl, QSettings
-from PySide6.QtGui import QColor, QPalette, QDrag
+from PySide6.QtGui import QColor, QPalette, QDrag, QTextCursor
 
 # Import the FAT12 handler
 from fat12_handler import FAT12Image
 from fat12_directory import FAT12CorruptionError, FAT12Error
 from vfat_utils import parse_raw_lfn_entry, parse_raw_short_entry, get_raw_entry_chain, split_filename_for_editing
+
+logger = logging.getLogger(__name__)
 
 class BootSectorViewer(QDialog):
     """Dialog to view boot sector information"""
@@ -27,6 +30,7 @@ class BootSectorViewer(QDialog):
     def __init__(self, image: FAT12Image, parent=None):
         super().__init__(parent)
         self.image = image
+        logger.debug("Opening Boot Sector Viewer")
         self.setup_ui()
         
     def setup_ui(self):
@@ -148,6 +152,7 @@ class DirectoryViewer(QDialog):
         super().__init__(parent)
         self.image = image
         self.raw_entries = []  # Store raw directory entry data
+        logger.debug("Opening Directory Viewer")
         self.setup_ui()
     
     def format_raw_entry_tooltip(self, index: int) -> str:
@@ -353,6 +358,7 @@ class FATViewer(QDialog):
         
         # Load settings
         self.settings = QSettings('FloppyManager', 'Settings')
+        logger.debug("Opening FAT Viewer")
         
         self.setup_ui()
         
@@ -482,6 +488,7 @@ class FATViewer(QDialog):
             
             self.update_cluster_colors()
         except FAT12CorruptionError as e:
+            logger.error(f"Error selecting cluster chain {cluster_num}: {e}")
             QMessageBox.warning(self, "Corruption Detected", str(e))
             return
     
@@ -945,10 +952,13 @@ class FileTreeWidget(QTreeWidget):
                         urls.append(QUrl.fromLocalFile(filepath))
                         files_exported = True
                     except Exception as e:
+                        logger.warning(f"Failed to extract file '{entry.get('name')}' for drag: {e}")
                         pass # Skip files that fail to extract during drag init
             
             if not files_exported:
                 return
+
+            logger.info(f"Prepared {len(urls)} files for drag-and-drop export")
 
             drag = QDrag(self)
             mime_data = QMimeData()
@@ -1034,6 +1044,7 @@ class FileTreeWidget(QTreeWidget):
                             
                             # Check if target is the source folder itself
                             if parent_cluster == src_cluster:
+                                logger.debug("Drop ignored: Target is source folder")
                                 event.ignore()
                                 return
                             
@@ -1045,6 +1056,7 @@ class FileTreeWidget(QTreeWidget):
                             safety_counter = 0
                             while curr_cluster is not None and curr_cluster != 0 and safety_counter < 100:
                                 if curr_cluster == src_cluster:
+                                    logger.warning("Drop ignored: Circular reference detected")
                                     event.ignore()
                                     return
                                 
@@ -1073,6 +1085,7 @@ class FileTreeWidget(QTreeWidget):
                         if source_parent == 0: source_parent = None
                         
                         if source_parent == parent_cluster:
+                            logger.debug("Drop ignored: Source and target folders are the same")
                             event.ignore()
                             return
                         
@@ -1093,7 +1106,8 @@ class FileTreeWidget(QTreeWidget):
                         try:
                             main_window.image.delete_file(entry)
                             deleted_count += 1
-                        except FAT12Error:
+                        except FAT12Error as e:
+                            logger.warning(f"Failed to delete source file '{entry.get('name')}' during move: {e}")
                             pass
                     
                     main_window.refresh_file_list()
@@ -1205,11 +1219,13 @@ class NewImageDialog(QDialog):
         try:
             name.encode('ascii')
         except UnicodeEncodeError:
+            logger.warning(f"Invalid OEM name provided: {name} (Non-ASCII)")
             QMessageBox.warning(self, "Invalid Name", "OEM Name must be ASCII characters only.")
             return
             
         # Check for safe characters (Alphanumeric + standard punctuation)
         if not all(c.isalnum() or c in " .-_" for c in name):
+            logger.warning(f"Invalid OEM name provided: {name} (Invalid characters)")
             QMessageBox.warning(self, "Invalid Name", "OEM Name contains invalid characters.\nAllowed: A-Z, 0-9, space, period, dash, underscore.")
             return
             
@@ -1217,3 +1233,52 @@ class NewImageDialog(QDialog):
         self.settings.setValue('last_oem_name', self.oem_name)
         self.selected_format = self.formats[self.format_combo.currentIndex()]
         self.accept()
+
+class LogViewer(QDialog):
+    """Dialog to view application log"""
+    def __init__(self, log_path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Application Log")
+        self.resize(800, 600)
+        
+        layout = QVBoxLayout(self)
+        
+        self.text_edit = QTextEdit()
+        self.text_edit.setReadOnly(True)
+        self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        
+        font = self.text_edit.font()
+        font.setFamily("Consolas")
+        font.setStyleHint(font.StyleHint.Monospace)
+        self.text_edit.setFont(font)
+        
+        layout.addWidget(self.text_edit)
+        
+        # Load log
+        self.load_log(log_path)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(lambda: self.load_log(log_path))
+        btn_layout.addWidget(refresh_btn)
+        
+        btn_layout.addStretch()
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(close_btn)
+        
+        layout.addLayout(btn_layout)
+        
+    def load_log(self, path):
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    self.text_edit.setText(content)
+                    self.text_edit.moveCursor(QTextCursor.MoveOperation.End)
+            except Exception as e:
+                self.text_edit.setText(f"Error reading log file: {e}")
+        else:
+            self.text_edit.setText("Log file not found.")

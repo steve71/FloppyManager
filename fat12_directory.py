@@ -20,6 +20,7 @@ It serves as the core directory manipulation layer used by the FAT12Image handle
 import struct
 import os
 import datetime
+import logging
 from pathlib import Path
 from typing import List, Optional
 
@@ -31,6 +32,8 @@ from vfat_utils import (
     DIR_ATTR_OFFSET, LFN_CHECKSUM_OFFSET, DIR_CRT_TIME_TENTH_OFFSET, DIR_SHORT_NAME_LEN,
     DIR_LAST_MOD_TIME_OFFSET
 )
+
+logger = logging.getLogger(__name__)
 
 class FAT12Error(Exception):
     """Base exception for FAT12 filesystem errors"""
@@ -73,6 +76,7 @@ def iter_directory_entries(fs, cluster: int = None):
             
             while current_cluster >= 2 and current_cluster < 0xFF8:
                 if current_cluster in visited:
+                    logger.error(f"Loop detected in directory cluster chain at {current_cluster}")
                     raise FAT12CorruptionError(f"Loop detected in directory cluster chain at {current_cluster}")
                 visited.add(current_cluster)
 
@@ -170,6 +174,8 @@ def read_directory(fs, cluster: int = None) -> List[dict]:
                 if calculated_checksum == lfn_checksum:
                     # LFN entries are stored in reverse order, so reverse the list
                     long_name = ''.join(reversed(lfn_parts))
+                else:
+                    logger.warning(f"LFN checksum mismatch for {short_name_83}. Expected 0x{lfn_checksum:02X}, got 0x{calculated_checksum:02X}")
                 
             # Use long name if available, otherwise use short name
             display_name = long_name if long_name else short_name_83
@@ -329,6 +335,7 @@ def find_free_directory_entries(fs, cluster: int = None, required_slots: int = 1
     
     # Root directory cannot be expanded
     if cluster is None or cluster == 0:
+        logger.warning("Root directory is full and cannot be expanded")
         raise FAT12Error("Root directory is full")
         
     # Subdirectory expansion logic
@@ -341,6 +348,7 @@ def find_free_directory_entries(fs, cluster: int = None, required_slots: int = 1
     
     free_clusters = fs.find_free_clusters(clusters_needed)
     if len(free_clusters) < clusters_needed:
+        logger.error(f"Disk full during directory expansion. Needed {clusters_needed}, found {len(free_clusters)}")
         raise FAT12Error("Disk full (cannot expand directory)")
         
     # Extend the cluster chain
@@ -349,6 +357,7 @@ def find_free_directory_entries(fs, cluster: int = None, required_slots: int = 1
     visited = set()
     while True:
         if curr in visited:
+            logger.error(f"Loop detected in directory cluster chain at {curr}")
             raise FAT12CorruptionError(f"Loop detected in directory cluster chain at {curr}")
         visited.add(curr)
         next_clus = fs.get_fat_entry(fat_data, curr)
@@ -356,6 +365,8 @@ def find_free_directory_entries(fs, cluster: int = None, required_slots: int = 1
             break
         curr = next_clus
         
+    logger.info(f"Expanding directory (cluster {cluster}) by {len(free_clusters)} clusters: {free_clusters}")
+
     for new_cluster in free_clusters:
         fs.set_fat_entry(fat_data, curr, new_cluster)
         fs.set_fat_entry(fat_data, new_cluster, 0xFFF)
@@ -435,6 +446,7 @@ def get_entry_offset(fs, parent_cluster: int, index: int, fat_data: bytearray = 
     for _ in range(cluster_skip):
         curr = fs.get_fat_entry(fat_data, curr)
         if curr >= 0xFF8:
+            logger.error(f"Directory cluster chain broken at index {index} (expected more clusters)")
             raise FAT12CorruptionError(f"Directory cluster chain broken at index {index}")
         
     return fs.data_start + ((curr - 2) * fs.bytes_per_cluster) + (entry_offset * 32)
@@ -483,6 +495,7 @@ def write_directory_entries(fs, parent_cluster: int, entry_index: int,
             for _ in range(start_cluster_idx):
                 current_cluster = fs.get_fat_entry(fat_data, current_cluster)
                 if current_cluster >= 0xFF8:
+                    logger.error(f"Broken directory chain while writing at index {entry_index}")
                     raise FAT12CorruptionError(f"Broken directory chain while writing at index {entry_index}")
             
             # Write entries
@@ -494,6 +507,7 @@ def write_directory_entries(fs, parent_cluster: int, entry_index: int,
                 if current_idx_in_cluster >= entries_per_cluster:
                     current_cluster = fs.get_fat_entry(fat_data, current_cluster)
                     if current_cluster >= 0xFF8:
+                        logger.error(f"Broken directory chain while writing entry part {i}")
                         raise FAT12CorruptionError(f"Broken directory chain while writing entry part {i}")
                     offset_in_cluster = 0
                     current_idx_in_cluster = 0
@@ -583,6 +597,7 @@ def create_directory(fs, dir_name: str, parent_cluster: int = None, use_numeric_
     # Check for LFN collision
     entries = read_directory(fs, parent_cluster)
     if any(e['name'].lower() == dir_name.lower() for e in entries):
+        logger.warning(f"Directory creation failed: '{dir_name}' already exists")
         raise FAT12Error(f"Directory '{dir_name}' already exists")
 
     existing_names = get_existing_83_names_in_directory(fs, parent_cluster)
@@ -600,6 +615,7 @@ def create_directory(fs, dir_name: str, parent_cluster: int = None, use_numeric_
     
     free_clusters = fs.find_free_clusters(1)
     if not free_clusters:
+        logger.error("Disk full (no free clusters) when creating directory")
         raise FAT12Error("Disk full (no free clusters)")
     dir_cluster = free_clusters[0]
     
@@ -672,6 +688,7 @@ def free_cluster_chain(fs, start_cluster: int):
     
     while current_cluster < 0xFF8:
         if current_cluster in visited:
+            logger.error(f"Loop detected in cluster chain while freeing at {current_cluster}")
             raise FAT12CorruptionError(f"Loop detected in cluster chain while freeing at {current_cluster}")
         visited.add(current_cluster)
         
@@ -709,6 +726,7 @@ def delete_directory(fs, entry: dict, recursive: bool = False):
     
     # Check if directory is empty
     if len(real_entries) > 0 and not recursive:
+        logger.warning(f"Refusing to delete non-empty directory '{entry['name']}' (recursive=False)")
         raise FAT12Error(f"Directory '{entry['name']}' is not empty")
     
     # If recursive, delete all contents first
@@ -760,6 +778,7 @@ def rename_entry(fs, entry: dict, new_name: str, use_numeric_tail: bool = False)
     # Check for LFN collision with other files
     entries = read_directory(fs, parent_cluster)
     if any(e['name'].lower() == new_name.lower() and e['index'] != entry['index'] for e in entries):
+        logger.warning(f"Rename failed: '{new_name}' already exists")
         raise FAT12Error(f"Entry '{new_name}' already exists")
         
     existing_names = get_existing_83_names_in_directory(fs, parent_cluster)
@@ -822,11 +841,13 @@ def rename_entry(fs, entry: dict, new_name: str, use_numeric_tail: bool = False)
 
     if total_new_slots <= total_old_slots:
         # CASE A: Fits in current location
+        logger.debug(f"Rename '{entry['name']}' -> '{new_name}': Fits in current location (CASE A)")
         write_start_index = current_start_index
         # Delete only the extra slots we no longer need
         slots_to_delete = range(current_start_index + total_new_slots, current_start_index + total_old_slots)
     else:
         # CASE B: Needs more space -> Find new contiguous block
+        logger.debug(f"Rename '{entry['name']}' -> '{new_name}': Moving to new location (CASE B)")
         write_start_index = find_free_directory_entries(fs, parent_cluster, total_new_slots)
 
         # We are moving, so delete ALL old slots

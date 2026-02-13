@@ -3,6 +3,7 @@
 
 import struct
 import datetime
+import logging
 from pathlib import Path
 from typing import List, Tuple, Optional
 
@@ -15,6 +16,8 @@ DIR_SHORT_NAME_LEN = 11          # Length of 8.3 name (8 + 3) without dot
 # Long Filename (LFN) Entry Constants (32 bytes)
 LFN_ATTR_OFFSET = 11             # Offset to Attribute byte (Must be 0x0F)
 LFN_CHECKSUM_OFFSET = 13         # Offset to Checksum
+
+logger = logging.getLogger(__name__)
 
 def decode_fat_time(time_value: int) -> str:
     """Decode FAT time format to HH:MM:SS string
@@ -42,6 +45,7 @@ def decode_fat_date(date_value: int) -> str:
 
     # Handle invalid dates
     if month < 1 or month > 12 or day < 1 or day > 31:
+        logger.debug(f"Invalid FAT date value: 0x{date_value:04X} (Y:{year} M:{month} D:{day})")
         return "Invalid"
 
     return f"{year:04d}-{month:02d}-{day:02d}"
@@ -69,6 +73,7 @@ def decode_fat_datetime(date_value: int, time_value: int) -> Optional[datetime.d
     try:
         return datetime.datetime(year, month, day, hour, minute, second)
     except ValueError:
+        logger.debug(f"Invalid FAT datetime: date=0x{date_value:04X}, time=0x{time_value:04X}")
         return None
 
 def encode_fat_time(dt: datetime.datetime) -> int:
@@ -225,6 +230,7 @@ def generate_83_name(
             return candidate
 
     # Fallback (should never reach here in practice)
+    logger.warning(f"Failed to generate unique 8.3 name for '{long_name}' after exhaustive search")
     return name[:8].ljust(8) + ext.ljust(3)
 
 
@@ -343,7 +349,8 @@ def parse_raw_lfn_entry(entry_data: bytes) -> dict:
         text1 = chars1.decode('utf-16le').replace('\x00', '∅').replace('\uffff', '█')
         text2 = chars2.decode('utf-16le').replace('\x00', '∅').replace('\uffff', '█')
         text3 = chars3.decode('utf-16le').replace('\x00', '∅').replace('\uffff', '█')
-    except:
+    except Exception as e:
+        logger.warning(f"Failed to decode LFN entry text parts: {e}")
         text1 = '???'
         text2 = '???'
         text3 = '???'
@@ -456,7 +463,8 @@ def decode_lfn_text(entry_data: bytes) -> Optional[str]:
             text = text[:null_pos]
         text = text.replace('\uffff', '')  # Remove 0xFFFF padding
         return text
-    except:
+    except Exception as e:
+        logger.warning(f"Failed to decode LFN text: {e}")
         return None
 
 

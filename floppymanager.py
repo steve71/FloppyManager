@@ -12,6 +12,7 @@ import sys
 import os
 import shutil
 import zipfile
+import logging
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -33,12 +34,24 @@ from fat12_directory import FAT12Error, FAT12CorruptionError
 from gui_components import (
     BootSectorViewer, DirectoryViewer, FATViewer, FileAttributesDialog,
     SortableTreeWidgetItem, FileTreeWidget, RenameDelegate, FormatDialog,
-    NewImageDialog
+    NewImageDialog, LogViewer
 )
 from file_icons import FileIconProvider
 
 class FloppyManagerWindow(QMainWindow):
     """Main window for the floppy manager"""
+    
+    def setup_logging(self):
+        """Configure application-wide logging"""
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler("floppymanager.log", mode='w'),
+                logging.StreamHandler()
+            ]
+        )
+        self.logger = logging.getLogger("FloppyManager")
 
     def __init__(self, image_path: Optional[str] = None):
         super().__init__()
@@ -50,6 +63,9 @@ class FloppyManagerWindow(QMainWindow):
         self.show_hidden_files = self.settings.value('show_hidden_files', True, type=bool)
         self.use_numeric_tail = self.settings.value('use_numeric_tail', False, type=bool)
         self.theme_mode = self.settings.value('theme_mode', 'light', type=str)
+
+        self.setup_logging()
+        self.logger.info("Application started")
 
         self.setup_ui()
 
@@ -476,6 +492,12 @@ class FloppyManagerWindow(QMainWindow):
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
+        log_action = QAction("View &Log...", self)
+        log_action.triggered.connect(self.view_log)
+        help_menu.addAction(log_action)
+
+        help_menu.addSeparator()
+
         about_action = QAction("&About", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
@@ -484,16 +506,19 @@ class FloppyManagerWindow(QMainWindow):
         """Toggle delete confirmation"""
         self.confirm_delete = self.confirm_delete_action.isChecked()
         self.settings.setValue('confirm_delete', self.confirm_delete)
+        self.logger.info(f"Settings: Confirm delete set to {self.confirm_delete}")
 
     def toggle_confirm_replace(self):
         """Toggle replace confirmation"""
         self.confirm_replace = self.confirm_replace_action.isChecked()
         self.settings.setValue('confirm_replace', self.confirm_replace)
+        self.logger.info(f"Settings: Confirm replace set to {self.confirm_replace}")
 
     def toggle_show_hidden(self):
         """Toggle visibility of hidden files"""
         self.show_hidden_files = self.show_hidden_action.isChecked()
         self.settings.setValue('show_hidden_files', self.show_hidden_files)
+        self.logger.info(f"Settings: Show hidden files set to {self.show_hidden_files}")
         self.refresh_file_list()
 
     def toggle_numeric_tail(self):
@@ -508,6 +533,7 @@ class FloppyManagerWindow(QMainWindow):
             mode_desc = "Simple truncation mode enabled (like Linux nonumtail)"
         
         self.status_bar.showMessage(f"8.3 name generation: {mode_desc}")
+        self.logger.info(f"Settings: Numeric tail set to {self.use_numeric_tail}")
 
     def change_theme(self, theme_mode):
         """Change the application theme"""
@@ -714,6 +740,7 @@ class FloppyManagerWindow(QMainWindow):
         self.settings.setValue('theme_mode', 'light')
         self.settings.setValue('clusters_per_row', 32)
         
+        self.logger.info("Settings reset to defaults")
         QMessageBox.information(
             self,
             "Settings Reset",
@@ -746,7 +773,9 @@ class FloppyManagerWindow(QMainWindow):
 
             self.refresh_file_list()
             self.status_bar.showMessage(f"Loaded: {Path(filepath).name}")
+            self.logger.info(f"Loaded image: {filepath}")
         except Exception as e:
+            self.logger.error(f"Failed to load image {filepath}: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to load image: {e}")
             self.image = None
             self.image_path = None
@@ -1061,14 +1090,17 @@ class FloppyManagerWindow(QMainWindow):
 
             except FAT12CorruptionError as e:
                 fail_count += 1
+                self.logger.error(f"Corruption error writing {original_name}: {e}")
                 QMessageBox.critical(self, "Filesystem Corruption", f"Cannot write {Path(filepath).name}:\n{e}")
 
             except FAT12Error as e:
                 fail_count += 1
+                self.logger.warning(f"FAT12 error writing {original_name}: {e}")
                 QMessageBox.warning(self, "Error", f"Failed to write {Path(filepath).name}: {e}")
 
             except Exception as e:
                 fail_count += 1
+                self.logger.error(f"Unexpected error writing {original_name}: {e}", exc_info=True)
                 QMessageBox.critical(self, "Error", f"Failed to add {Path(filepath).name}: {e}")
 
         self.refresh_file_list()
@@ -1130,9 +1162,12 @@ class FloppyManagerWindow(QMainWindow):
                 self.image.create_directory(name, parent_cluster, self.use_numeric_tail)
                 self.refresh_file_list()
                 self.status_bar.showMessage(f"Created folder: {name}")
+                self.logger.info(f"Created directory: {name}")
             except FAT12CorruptionError as e:
+                self.logger.error(f"Corruption detected creating directory {name}: {e}")
                 QMessageBox.critical(self, "Filesystem Corruption", f"Cannot create directory:\n{e}")
             except FAT12Error as e:
+                self.logger.warning(f"Failed to create directory {name}: {e}")
                 QMessageBox.critical(self, "Error", f"Failed to create directory: {e}")
 
     def extract_selected(self):
@@ -1166,11 +1201,14 @@ class FloppyManagerWindow(QMainWindow):
 
                     success_count += 1
                 except FAT12CorruptionError as e:
+                    self.logger.error(f"Corruption extracting {entry['name']}: {e}")
                     QMessageBox.critical(self, "Filesystem Corruption", f"Cannot extract '{entry['name']}':\n{e}")
                 except Exception as e:
+                    self.logger.error(f"Failed to extract {entry['name']}: {e}", exc_info=True)
                     QMessageBox.critical(self, "Error", f"Failed to extract {entry['name']}: {e}")
 
         if success_count > 0:
+            self.logger.info(f"Extracted {success_count} file(s) to {save_dir}")
             self.status_bar.showMessage(f"Extracted {success_count} file(s) to {save_dir}")
             QMessageBox.information(self, "Success", f"Extracted {success_count} file(s)")
 
@@ -1203,12 +1241,15 @@ class FloppyManagerWindow(QMainWindow):
                     f.write(data)
                 success_count += 1
             except FAT12CorruptionError as e:
+                self.logger.error(f"Corruption extracting {entry['name']}: {e}")
                 fail_count += 1
                 corruption_errors.append(f"{entry['name']}: {e}")
             except Exception as e:
+                self.logger.error(f"Failed to extract {entry['name']}: {e}", exc_info=True)
                 fail_count += 1
 
         if success_count > 0:
+            self.logger.info(f"Extracted {success_count} file(s) to {save_dir}")
             self.status_bar.showMessage(f"Extracted {success_count} file(s) to {save_dir}")
             
         if corruption_errors:
@@ -1263,12 +1304,15 @@ class FloppyManagerWindow(QMainWindow):
                         zipf.writestr(entry['name'], data)
                         success_count += 1
                     except FAT12CorruptionError as e:
+                        self.logger.error(f"Corruption archiving {entry['name']}: {e}")
                         fail_count += 1
                         corruption_errors.append(f"{entry['name']}: {e}")
                     except Exception as e:
+                        self.logger.error(f"Failed to archive {entry['name']}: {e}", exc_info=True)
                         fail_count += 1
             
             if success_count > 0:
+                self.logger.info(f"Archived {success_count} file(s) to {zip_filename}")
                 self.status_bar.showMessage(f"Archived {success_count} file(s) to {Path(zip_filename).name}")
                 
             if corruption_errors:
@@ -1280,6 +1324,7 @@ class FloppyManagerWindow(QMainWindow):
                 QMessageBox.information(self, "Success", f"Archived {success_count} file(s) to ZIP file")
                 
         except Exception as e:
+             self.logger.error(f"Failed to create ZIP file: {e}", exc_info=True)
              QMessageBox.critical(self, "Error", f"Failed to create ZIP file: {e}")
 
     def delete_selected(self):
@@ -1304,6 +1349,7 @@ class FloppyManagerWindow(QMainWindow):
             if response == QMessageBox.StandardButton.No:
                 return
 
+        self.logger.info(f"User requested delete of {len(selected_items)} items")
         success_count = 0
         items_to_delete = []
         read_only_items = []
@@ -1334,14 +1380,17 @@ class FloppyManagerWindow(QMainWindow):
                     self.image.delete_directory(entry, recursive=True)
                     success_count += 1
                 except FAT12CorruptionError as e:
+                    self.logger.error(f"Corruption deleting directory {entry['name']}: {e}")
                     QMessageBox.critical(self, "Filesystem Corruption", f"Cannot delete directory {entry['name']}:\n{e}")
                 except FAT12Error as e:
+                    self.logger.warning(f"Failed to delete directory {entry['name']}: {e}")
                     QMessageBox.critical(self, "Error", f"Failed to delete directory {entry['name']}: {e}")
             else:
                 try:
                     self.image.delete_file(entry)
                     success_count += 1
                 except FAT12Error as e:
+                    self.logger.warning(f"Failed to delete file {entry['name']}: {e}")
                     QMessageBox.critical(self, "Error", f"Failed to delete {entry['name']}: {e}")
 
         self.refresh_file_list()
@@ -1391,12 +1440,16 @@ class FloppyManagerWindow(QMainWindow):
             self.image.write_file_to_image(new_name, data, self.use_numeric_tail, None, parent_cluster)
             self.refresh_file_list()
             self.status_bar.showMessage(f"Copied: {new_name}")
+            self.logger.info(f"Copied file '{entry['name']}' to '{new_name}'")
         except FAT12CorruptionError as e:
+            self.logger.error(f"Corruption copying file {entry['name']}: {e}")
             QMessageBox.critical(self, "Filesystem Corruption", f"Cannot copy file:\n{e}")
         except FAT12Error as e:
+            self.logger.warning(f"Failed to copy file {entry['name']}: {e}")
             QMessageBox.warning(self, "Error", f"Failed to copy file: {e}")
                 
         except Exception as e:
+            self.logger.error(f"Unexpected error copying file {entry['name']}: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to copy file: {e}")
 
     def delete_all(self):
@@ -1422,6 +1475,7 @@ class FloppyManagerWindow(QMainWindow):
             if response == QMessageBox.StandardButton.No:
                 return
 
+        self.logger.info(f"User requested delete ALL ({len(items_to_delete)} items)")
         # Check for read-only items
         read_only_items = [e for e in items_to_delete if e['is_read_only']]
         if read_only_items:
@@ -1444,8 +1498,10 @@ class FloppyManagerWindow(QMainWindow):
                     self.image.delete_file(entry)
                 success_count += 1
             except FAT12CorruptionError as e:
+                self.logger.error(f"Corruption deleting {entry['name']}: {e}")
                 QMessageBox.critical(self, "Filesystem Corruption", f"Cannot delete {entry['name']}:\n{e}")
-            except FAT12Error:
+            except FAT12Error as e:
+                self.logger.warning(f"Failed to delete {entry['name']}: {e}")
                 pass # Skip failed deletions in bulk op
 
         self.refresh_file_list()
@@ -1491,7 +1547,9 @@ class FloppyManagerWindow(QMainWindow):
                 "Success",
                 f"Created new image:\n{Path(filename).name}"
             )
+            self.logger.info(f"Created new image: {filename}")
         except Exception as e:
+            self.logger.error(f"Failed to create image: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to create image: {e}")
 
     def save_image_as(self):
@@ -1570,7 +1628,9 @@ class FloppyManagerWindow(QMainWindow):
             )
             
             self.status_bar.showMessage(f"Disk formatted ({format_type_desc}) - all files erased")
+            self.logger.info(f"Disk formatted ({format_type_desc})")
         except Exception as e:
+            self.logger.error(f"Failed to format disk: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to format disk: {e}")
 
     def defragment_disk(self):
@@ -1594,9 +1654,11 @@ class FloppyManagerWindow(QMainWindow):
                 self.refresh_file_list()
                 self.status_bar.showMessage("Disk defragmented successfully")
                 QMessageBox.information(self, "Success", "Disk defragmentation complete.")
+                self.logger.info("Disk defragmented successfully")
             except FAT12CorruptionError as e:
                 QMessageBox.critical(self, "Filesystem Corruption", f"Defragmentation aborted due to corruption:\n{e}")
             except Exception as e:
+                self.logger.error(f"Defragmentation failed: {e}", exc_info=True)
                 QMessageBox.critical(self, "Error", f"Defragmentation failed: {e}")
 
     def open_image(self):
@@ -1619,6 +1681,11 @@ class FloppyManagerWindow(QMainWindow):
             self.setWindowTitle("FloppyManager")
             self.refresh_file_list()
             self.status_bar.showMessage("Image closed")
+
+    def view_log(self):
+        """Show the application log"""
+        viewer = LogViewer("floppymanager.log", self)
+        viewer.exec()
 
     def show_about(self):
         """Show about dialog"""
@@ -1892,8 +1959,10 @@ class FloppyManagerWindow(QMainWindow):
                 # Refresh the file list to show the new name and short name
                 self.refresh_file_list()
             except FAT12CorruptionError as e:
+                self.logger.error(f"Corruption renaming {old_name}: {e}")
                 QMessageBox.critical(self, "Filesystem Corruption", f"Cannot rename file:\n{e}")
             except FAT12Error as e:
+                self.logger.warning(f"Failed to rename {old_name} to {new_name}: {e}")
                 QMessageBox.critical(
                     self,
                     "Rename Failed",
