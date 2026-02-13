@@ -219,7 +219,7 @@ class FAT12Image:
             return bytearray(f.read(self.sectors_per_fat * self.bytes_per_sector))
     
     def write_fat(self, fat_data: bytearray):
-        """Write FAT table to both FAT copies"""
+        """Write FAT table to both FAT copies and verify"""
         with open(self.image_path, 'r+b') as f:
             for i in range(self.num_fats):
                 offset = self.fat_start + (i * self.sectors_per_fat * self.bytes_per_sector)
@@ -227,6 +227,14 @@ class FAT12Image:
                 f.write(fat_data)
             f.flush()
             os.fsync(f.fileno())
+            
+            # Verify writes
+            for i in range(self.num_fats):
+                offset = self.fat_start + (i * self.sectors_per_fat * self.bytes_per_sector)
+                f.seek(offset)
+                read_data = f.read(len(fat_data))
+                if read_data != fat_data:
+                    raise FAT12Error(f"FAT write verification failed for FAT #{i+1}")
     
     def get_fat_entry(self, fat_data: bytearray, cluster: int) -> int:
         """Get FAT12 entry for a cluster"""
@@ -704,6 +712,13 @@ class FAT12Image:
                 f.write(fat_data)
             f.flush()
             os.fsync(f.fileno())
+            
+            # Verify FAT writes
+            for i in range(self.num_fats):
+                offset = self.fat_start + (i * self.sectors_per_fat * self.bytes_per_sector)
+                f.seek(offset)
+                if f.read(len(fat_data)) != fat_data:
+                    raise FAT12Error(f"Format verification failed: FAT #{i+1} mismatch")
             
             # If full format, clear data area
             if full_format:
