@@ -69,7 +69,13 @@ def encode_fat_time(dt: datetime.datetime) -> int:
 
 def encode_fat_date(dt: datetime.datetime) -> int:
     """Encode datetime to FAT date format"""
-    return ((dt.year - 1980) << 9) | (dt.month << 5) | dt.day
+    year = dt.year
+    # Clamp year to valid FAT range (1980-2107)
+    if year < 1980:
+        year = 1980
+    elif year > 2107:
+        year = 2107
+    return ((year - 1980) << 9) | (dt.month << 5) | dt.day
 
 
 def is_valid_83_char(char: str) -> bool:

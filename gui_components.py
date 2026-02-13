@@ -940,7 +940,7 @@ class FileTreeWidget(QTreeWidget):
                         urls.append(QUrl.fromLocalFile(filepath))
                         files_exported = True
                     except Exception as e:
-                        print(f"Error extracting {entry['name']} for drag: {e}")
+                        pass # Skip files that fail to extract during drag init
             
             if not files_exported:
                 return

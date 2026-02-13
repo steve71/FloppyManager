@@ -1181,6 +1181,7 @@ class FloppyManagerWindow(QMainWindow):
             return
 
         success_count = 0
+        fail_count = 0
         for entry in files_to_extract:
             try:
                 data = self.image.extract_file(entry)
@@ -1189,10 +1190,14 @@ class FloppyManagerWindow(QMainWindow):
                     f.write(data)
                 success_count += 1
             except Exception as e:
-                print(f"Failed to extract {entry['name']}: {e}")
+                fail_count += 1
 
         if success_count > 0:
             self.status_bar.showMessage(f"Extracted {success_count} file(s) to {save_dir}")
+            
+        if fail_count > 0:
+            QMessageBox.warning(self, "Extraction Incomplete", f"Successfully extracted {success_count} files.\nFailed to extract {fail_count} files.")
+        elif success_count > 0:
             QMessageBox.information(self, "Success", f"Extracted {success_count} file(s)")
 
     def extract_all_to_zip(self):
@@ -1226,6 +1231,7 @@ class FloppyManagerWindow(QMainWindow):
             zip_filename += '.zip'
 
         success_count = 0
+        fail_count = 0
         try:
             with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for entry in files_to_extract:
@@ -1235,10 +1241,14 @@ class FloppyManagerWindow(QMainWindow):
                         zipf.writestr(entry['name'], data)
                         success_count += 1
                     except Exception as e:
-                        print(f"Failed to extract {entry['name']} to zip: {e}")
+                        fail_count += 1
             
             if success_count > 0:
                 self.status_bar.showMessage(f"Archived {success_count} file(s) to {Path(zip_filename).name}")
+                
+            if fail_count > 0:
+                QMessageBox.warning(self, "Archive Incomplete", f"Archived {success_count} files.\nFailed to add {fail_count} files to archive.")
+            elif success_count > 0:
                 QMessageBox.information(self, "Success", f"Archived {success_count} file(s) to ZIP file")
                 
         except Exception as e:
@@ -1364,29 +1374,29 @@ class FloppyManagerWindow(QMainWindow):
             return
 
         entries = self.image.read_root_directory()
-        files_to_delete = [e for e in entries if not e['is_dir']]
+        items_to_delete = entries
 
-        if not files_to_delete:
-            QMessageBox.information(self, "Info", "No files to delete")
+        if not items_to_delete:
+            QMessageBox.information(self, "Info", "Disk is already empty")
             return
 
         if self.confirm_delete:
             response = QMessageBox.question(
                 self,
                 "Confirm Delete All",
-                f"Delete ALL {len(files_to_delete)} file(s) from the disk image?",
+                f"Delete ALL {len(items_to_delete)} item(s) from the disk image?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if response == QMessageBox.StandardButton.No:
                 return
 
-        # Check for read-only files
-        read_only_files = [e for e in files_to_delete if e['is_read_only']]
-        if read_only_files:
-            msg = f"{len(read_only_files)} of the files are Read-Only.\n\nDo you want to delete them anyway?"
+        # Check for read-only items
+        read_only_items = [e for e in items_to_delete if e['is_read_only']]
+        if read_only_items:
+            msg = f"{len(read_only_items)} of the items are Read-Only.\n\nDo you want to delete them anyway?"
             response = QMessageBox.warning(
                 self,
-                "Read-Only Files",
+                "Read-Only Items",
                 msg,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
@@ -1394,16 +1404,19 @@ class FloppyManagerWindow(QMainWindow):
                 return
 
         success_count = 0
-        for entry in files_to_delete:
+        for entry in items_to_delete:
             try:
-                self.image.delete_file(entry)
+                if entry['is_dir']:
+                    self.image.delete_directory(entry, recursive=True)
+                else:
+                    self.image.delete_file(entry)
                 success_count += 1
             except FAT12Error:
                 pass # Skip failed deletions in bulk op
 
         self.refresh_file_list()
         if success_count > 0:
-            self.status_bar.showMessage(f"Deleted {success_count} file(s)")
+            self.status_bar.showMessage(f"Deleted {success_count} item(s)")
 
     def create_new_image(self):
         """Create a new blank floppy disk image"""

@@ -563,7 +563,9 @@ def create_directory(fs, dir_name: str, parent_cluster: int = None, use_numeric_
         use_numeric_tail: Toggles the 8.3 name generation algorithm.
 
     Returns:
-        True if the directory was created successfully, False otherwise.
+        True on success.
+    Raises:
+        FAT12Error: If directory exists, disk is full, or other FS errors.
     """
     # Check for LFN collision
     entries = read_directory(fs, parent_cluster)
@@ -683,7 +685,9 @@ def delete_directory(fs, entry: dict, recursive: bool = False) -> bool:
                    deleting their contents first.
 
     Returns:
-        True on success, False on failure.
+        True on success.
+    Raises:
+        FAT12Error: If directory is not empty (and recursive=False) or other FS errors.
     """
     # Check if it's actually a directory
     if not entry.get('is_dir', False):
@@ -739,7 +743,9 @@ def rename_entry(fs, entry: dict, new_name: str, use_numeric_tail: bool = False)
                           new short name.
 
     Returns:
-        True on success, False on failure (e.g., name collision, directory full).
+        True on success.
+    Raises:
+        FAT12Error: If name exists, disk is full, or other FS errors.
     """
     # Prepare New Names
     parent_cluster = entry.get('parent_cluster')
@@ -901,7 +907,9 @@ def set_entry_attributes(fs, entry: dict, is_read_only: bool = None,
         is_archive: Set archive flag (None = no change)
         
     Returns:
-        True if successful, False otherwise
+        True on success.
+    Raises:
+        FAT12Error: If entry cannot be found or read.
     """
     with open(fs.image_path, 'r+b') as f:
         parent_cluster = entry.get('parent_cluster')

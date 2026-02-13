@@ -393,7 +393,9 @@ class FAT12Image:
             parent_cluster: Cluster of the parent directory (None for root)
             
         Returns:
-            True if successful, False otherwise
+            True on success.
+        Raises:
+            FAT12Error: If disk is full or other FS errors.
         """
         # Calculate clusters needed
         clusters_needed = (len(data) + self.bytes_per_cluster - 1) // self.bytes_per_cluster
@@ -498,7 +500,12 @@ class FAT12Image:
         return find_free_directory_entries(self, cluster, required_slots)
 
     def create_directory(self, dir_name: str, parent_cluster: int = None, use_numeric_tail: bool = True) -> bool:
-        """Create a new directory"""
+        """Create a new directory
+        Returns:
+            True on success.
+        Raises:
+            FAT12Error: If directory exists or disk is full.
+        """
         return create_directory(self, dir_name, parent_cluster, use_numeric_tail)
 
     def find_free_root_entries(self, required_slots: int) -> int:
@@ -511,20 +518,27 @@ class FAT12Image:
     def rename_entry(self, entry: dict, new_name: str, use_numeric_tail: bool = False) -> bool:
         """
         Rename a file, updating 8.3 name, LFN entries, and handling directory slot reallocation.
+        Raises:
+            FAT12Error: If name exists or disk is full.
         """
         return rename_entry(self, entry, new_name, use_numeric_tail)
 
     def delete_file(self, entry: dict) -> bool:
-        """Delete a file from the image (including LFN entries)"""
+        """Delete a file from the image (including LFN entries)
+        Raises:
+            FAT12Error: If file cannot be deleted.
+        """
         return delete_entry(self, entry)
     
     def delete_directory(self, entry: dict, recursive: bool = False) -> bool:
         """Delete a directory
         Args:
             entry: Directory entry dictionary
-            recursive: If True, delete non-empty directories
+            recursive: If True, delete non-empty directories (and their contents)
         Returns:
-            True if successful, False otherwise
+            True on success.
+        Raises:
+            FAT12Error: If directory is not empty (and recursive=False).
         """
         return delete_directory(self, entry, recursive)
 
@@ -653,7 +667,9 @@ class FAT12Image:
             is_archive: Set archive flag (None = no change)
             
         Returns:
-            True if successful, False otherwise
+            True on success.
+        Raises:
+            FAT12Error: If entry cannot be found.
         """
         return set_entry_attributes(self, entry, is_read_only, is_hidden, is_system, is_archive)
 

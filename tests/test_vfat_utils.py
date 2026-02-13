@@ -42,6 +42,19 @@ class TestTimeDate:
         max_val = (127 << 9) | (12 << 5) | 31
         assert decode_fat_date(max_val) == "2107-12-31"
 
+    def test_encode_fat_date_clamping(self):
+        # Test year < 1980 -> 1980
+        dt_old = datetime.datetime(1970, 1, 1)
+        encoded = encode_fat_date(dt_old)
+        decoded = decode_fat_date(encoded)
+        assert decoded == "1980-01-01"
+        
+        # Test year > 2107 -> 2107
+        dt_future = datetime.datetime(2200, 1, 1)
+        encoded = encode_fat_date(dt_future)
+        decoded = decode_fat_date(encoded)
+        assert decoded == "2107-01-01"
+
     def test_fat_time_precision(self):
         # FAT stores seconds/2, so odd seconds lose precision
         # 10:00:01 -> 10:00:00
