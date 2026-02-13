@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QHeaderView, QPushButton, QLabel, QGridLayout,
     QWidget, QScrollArea, QSizePolicy, QSpinBox, QFrame, QApplication,
     QTreeWidget, QTreeWidgetItem, QStyledItemDelegate, QLineEdit, QComboBox,
-    QRadioButton, QDialogButtonBox, QMessageBox, QTextEdit
+    QRadioButton, QDialogButtonBox, QMessageBox, QTextEdit, QCheckBox
 )
 from PySide6.QtCore import Qt, QSize, QTimer, QMimeData, QUrl, QSettings
 from PySide6.QtGui import QColor, QPalette, QDrag, QTextCursor
@@ -1241,11 +1241,16 @@ class LogViewer(QDialog):
         self.setWindowTitle("Application Log")
         self.resize(800, 600)
         
+        self.settings = QSettings('FloppyManager', 'Settings')
+        
         layout = QVBoxLayout(self)
         
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
-        self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        
+        # Load word wrap setting
+        word_wrap = self.settings.value('log_word_wrap', False, type=bool)
+        self.set_word_wrap(word_wrap)
         
         font = self.text_edit.font()
         font.setFamily("Consolas")
@@ -1263,6 +1268,11 @@ class LogViewer(QDialog):
         refresh_btn.clicked.connect(lambda: self.load_log(log_path))
         btn_layout.addWidget(refresh_btn)
         
+        self.wrap_cb = QCheckBox("Word Wrap")
+        self.wrap_cb.setChecked(word_wrap)
+        self.wrap_cb.toggled.connect(self.on_word_wrap_toggled)
+        btn_layout.addWidget(self.wrap_cb)
+        
         btn_layout.addStretch()
         
         close_btn = QPushButton("Close")
@@ -1271,13 +1281,58 @@ class LogViewer(QDialog):
         
         layout.addLayout(btn_layout)
         
+    def set_word_wrap(self, enabled):
+        if enabled:
+            self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        else:
+            self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+
+    def on_word_wrap_toggled(self, checked):
+        self.set_word_wrap(checked)
+        self.settings.setValue('log_word_wrap', checked)
+        
     def load_log(self, path):
         if os.path.exists(path):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    self.text_edit.setText(content)
-                    self.text_edit.moveCursor(QTextCursor.MoveOperation.End)
+                    lines = f.readlines()
+                
+                # Determine colors based on theme (check background lightness)
+                app = QApplication.instance()
+                palette = app.palette()
+                is_dark = palette.color(QPalette.ColorRole.Base).lightness() < 128
+                
+                html_parts = ['<html><body style="font-family: Consolas, monospace; font-size: 10pt;">']
+                
+                for line in lines:
+                    line = line.rstrip()
+                    if not line:
+                        continue
+                        
+                    # Default style
+                    color = "#000000" if not is_dark else "#ffffff"
+                    weight = "normal"
+                    
+                    # Determine style based on log level
+                    if " - ERROR - " in line:
+                        color = "#d32f2f" if not is_dark else "#ff6b6b" # Red
+                    elif " - WARNING - " in line:
+                        color = "#e65100" if not is_dark else "#ffb74d" # Orange
+                    elif " - CRITICAL - " in line:
+                        color = "#b71c1c" if not is_dark else "#ff5252" # Dark Red
+                        weight = "bold"
+                    elif " - DEBUG - " in line:
+                        color = "#757575" if not is_dark else "#9e9e9e" # Gray
+                    elif " - INFO - " in line:
+                        color = "#2e7d32" if not is_dark else "#81c784" # Green
+                    
+                    # Simple HTML escaping
+                    safe_line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    html_parts.append(f'<span style="color:{color}; font-weight:{weight};">{safe_line}</span><br>')
+                
+                html_parts.append('</body></html>')
+                self.text_edit.setHtml("".join(html_parts))
+                self.text_edit.moveCursor(QTextCursor.MoveOperation.End)
             except Exception as e:
                 self.text_edit.setText(f"Error reading log file: {e}")
         else:
