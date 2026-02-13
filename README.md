@@ -9,7 +9,7 @@ A modern, easy-to-use tool for creating and managing FAT12 floppy disk images (.
 ---
 
 ## Why this exists
-Could not find a tool like this anywhere for vintage keyboards where I could just simply create an image formatted to FAT12, drag and drop files to it and copy the image to a usb drive.  No longer need a tool like imdisk or winimage to create images, mount them in order to copy files to them and format them specifically on the Yamaha DGX-500.  This tool ensures your virtual disks are compatible with GOTEK EFI (Extensible Firmware Interface) emulators and original hardware.
+Couldn't find a simple way to create FAT12 images, add files, and copy to USB without juggling multiple mounting/formatting tools. This does it all in one place.
 
 ---
 
