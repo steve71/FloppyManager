@@ -360,10 +360,8 @@ class TestNameDecoding:
         # Test Shift-JIS 0x05 fix
         entry[0] = 0x05
         entry[1:8] = b"ILENAME"
-        # Should decode 0x05 as 0xE5, but ascii ignore drops it?
-        # Wait, decode_short_name uses errors='ignore'. 
+        # decode_short_name uses errors='ignore'. 
         # 0xE5 is not ASCII. So it will be dropped.
-        # "ILENAME"
         name, ext = decode_short_name(entry)
         assert name == "ILENAME"
 

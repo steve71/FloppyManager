@@ -48,7 +48,16 @@ def decode_fat_date(date_value: int) -> str:
 
 
 def decode_fat_datetime(date_value: int, time_value: int) -> Optional[datetime.datetime]:
-    """Decode FAT date and time values into a datetime object"""
+    """
+    Decode FAT date and time values into a datetime object.
+
+    Args:
+        date_value: 16-bit FAT date integer.
+        time_value: 16-bit FAT time integer.
+
+    Returns:
+        datetime object or None if invalid.
+    """
     year = ((date_value >> 9) & 0x7F) + 1980
     month = (date_value >> 5) & 0x0F
     day = date_value & 0x1F
@@ -63,12 +72,28 @@ def decode_fat_datetime(date_value: int, time_value: int) -> Optional[datetime.d
         return None
 
 def encode_fat_time(dt: datetime.datetime) -> int:
-    """Encode datetime to FAT time format"""
+    """
+    Encode datetime to FAT time format.
+
+    Args:
+        dt: datetime object.
+
+    Returns:
+        16-bit integer representing time.
+    """
     return (dt.hour << 11) | (dt.minute << 5) | (dt.second // 2)
 
 
 def encode_fat_date(dt: datetime.datetime) -> int:
-    """Encode datetime to FAT date format"""
+    """
+    Encode datetime to FAT date format.
+
+    Args:
+        dt: datetime object.
+
+    Returns:
+        16-bit integer representing date.
+    """
     year = dt.year
     # Clamp year to valid FAT range (1980-2107)
     if year < 1980:
@@ -293,7 +318,15 @@ def create_lfn_entries(long_name: str, short_name: bytes) -> List[bytes]:
 
 
 def parse_raw_lfn_entry(entry_data: bytes) -> dict:
-    """Parse a raw 32-byte LFN entry into a dictionary of fields"""
+    """
+    Parse a raw 32-byte LFN entry into a dictionary of fields.
+
+    Args:
+        entry_data: 32 bytes of raw entry data.
+
+    Returns:
+        Dictionary containing parsed LFN fields (seq, checksum, text parts, etc.).
+    """
     seq = entry_data[0]
     is_last = (seq & 0x40) != 0
     seq_num = seq & 0x1F
@@ -333,7 +366,16 @@ def parse_raw_lfn_entry(entry_data: bytes) -> dict:
 
 
 def decode_raw_83_name(entry_data: bytes, errors: str = 'replace') -> str:
-    """Decode raw 11-byte 8.3 name, handling 0x05 lead byte"""
+    """
+    Decode raw 11-byte 8.3 name, handling 0x05 lead byte.
+
+    Args:
+        entry_data: Raw entry bytes (first 11 bytes used).
+        errors: Error handling scheme for decoding.
+
+    Returns:
+        Decoded string.
+    """
     raw = list(entry_data[0:DIR_SHORT_NAME_LEN])
     if raw[0] == 0x05:
         raw[0] = 0xE5
@@ -341,7 +383,15 @@ def decode_raw_83_name(entry_data: bytes, errors: str = 'replace') -> str:
 
 
 def parse_raw_short_entry(entry_data: bytes) -> dict:
-    """Parse a raw 32-byte short (8.3) entry into a dictionary of fields"""
+    """
+    Parse a raw 32-byte short (8.3) entry into a dictionary of fields.
+
+    Args:
+        entry_data: 32 bytes of raw entry data.
+
+    Returns:
+        Dictionary containing parsed fields (name, attr, size, clusters, timestamps).
+    """
     # Use decode_raw_83_name to handle 0x05 fix, use 'replace' for display
     name = decode_raw_83_name(entry_data, errors='replace')
     attributes = entry_data[DIR_ATTR_OFFSET]
@@ -384,7 +434,15 @@ def parse_raw_short_entry(entry_data: bytes) -> dict:
 
 
 def decode_lfn_text(entry_data: bytes) -> Optional[str]:
-    """Extract and decode the UTF-16LE text from a raw LFN entry"""
+    """
+    Extract and decode the UTF-16LE text from a raw LFN entry.
+
+    Args:
+        entry_data: 32 bytes of raw entry data.
+
+    Returns:
+        Decoded string segment or None if decoding fails.
+    """
     chars = bytearray()
     chars.extend(entry_data[1:11])   # First 5 chars (10 bytes)
     chars.extend(entry_data[14:26])  # Next 6 chars (12 bytes)
@@ -403,7 +461,15 @@ def decode_lfn_text(entry_data: bytes) -> Optional[str]:
 
 
 def decode_short_name(entry_data: bytes) -> Tuple[str, str]:
-    """Decode 8.3 filename from entry data, handling 0x05 lead byte"""
+    """
+    Decode 8.3 filename from entry data, handling 0x05 lead byte.
+
+    Args:
+        entry_data: Raw entry bytes.
+
+    Returns:
+        Tuple of (name, extension).
+    """
     raw_name = list(entry_data[0:8])
     if raw_name[0] == 0x05:
         raw_name[0] = 0xE5
@@ -413,7 +479,15 @@ def decode_short_name(entry_data: bytes) -> Tuple[str, str]:
 
 
 def format_83_name(raw_name_11: str) -> str:
-    """Format an 11-character raw 8.3 name (e.g. 'FILE    TXT') to display format ('FILE.TXT')"""
+    """
+    Format an 11-character raw 8.3 name (e.g. 'FILE    TXT') to display format ('FILE.TXT').
+
+    Args:
+        raw_name_11: The 11-character name string (no dot).
+
+    Returns:
+        Formatted string with dot if extension exists.
+    """
     if len(raw_name_11) < DIR_SHORT_NAME_LEN:
         return raw_name_11.strip()
         

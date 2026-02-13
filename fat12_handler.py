@@ -108,7 +108,12 @@ class FAT12Image:
         self.load_boot_sector()
         
     def load_boot_sector(self):
-        """Read and parse the boot sector"""
+        """
+        Read and parse the boot sector (first 512 bytes).
+
+        Extracts the BIOS Parameter Block (BPB) and Extended BPB fields to initialize
+        filesystem parameters like sector size, cluster size, FAT location, and root directory location.
+        """
         with open(self.image_path, 'rb') as f:
             boot_sector = f.read(512)
             
@@ -164,24 +169,52 @@ class FAT12Image:
             self.fat_type = 'FAT32'
         
     def get_total_capacity(self) -> int:
-        """Get total disk capacity in bytes"""
+        """
+        Get total disk capacity in bytes.
+
+        Returns:
+            Total size calculated as total_sectors * bytes_per_sector.
+        """
         return self.total_sectors * self.bytes_per_sector
 
     def get_fat_entry_count(self) -> int:
-        """Calculate total number of entries in the FAT"""
+        """
+        Calculate total number of entries in the FAT.
+
+        Returns:
+            The number of 12-bit entries that fit in the FAT sectors.
+        """
         fat_size_bytes = self.sectors_per_fat * self.bytes_per_sector
         return (fat_size_bytes * 8) // 12
 
     def get_total_cluster_count(self) -> int:
-        """Get the total number of addressable clusters (limited by FAT12 spec)"""
+        """
+        Get the total number of addressable clusters.
+
+        Returns:
+            The count limited by FAT12 specification (max 4084) or FAT size.
+        """
         return min(self.get_fat_entry_count(), 4084)
 
     def get_free_space(self) -> int:
-        """Get free space in bytes"""
+        """
+        Get free space in bytes.
+
+        Returns:
+            Number of free clusters multiplied by bytes per cluster.
+        """
         return len(self.find_free_clusters()) * self.bytes_per_cluster
 
     def calculate_size_on_disk(self, size_bytes: int) -> int:
-        """Calculate the size on disk (allocated space) for a given file size"""
+        """
+        Calculate the size on disk (allocated space) for a given file size.
+
+        Args:
+            size_bytes: The actual file size.
+
+        Returns:
+            Size rounded up to the nearest cluster boundary.
+        """
         if size_bytes == 0:
             return 0
         
@@ -192,7 +225,15 @@ class FAT12Image:
         return clusters * self.bytes_per_cluster
 
     def classify_cluster(self, value: int) -> str:
-        """Classify a FAT12 cluster value"""
+        """
+        Classify a FAT12 cluster value.
+
+        Args:
+            value: The 12-bit integer value from the FAT.
+
+        Returns:
+            One of the CLUSTER_* constants (FREE, RESERVED, BAD, EOF, USED).
+        """
         if value == 0x000:
             return self.CLUSTER_FREE
         elif value == 0x001:
@@ -205,21 +246,52 @@ class FAT12Image:
             return self.CLUSTER_USED
 
     def predict_short_name(self, long_name: str, use_numeric_tail: bool = False, parent_cluster: int = None) -> str:
-        """Predict the 8.3 short name that will be generated for a file"""
+        """
+        Predict the 8.3 short name that will be generated for a file.
+
+        Args:
+            long_name: The original long filename.
+            use_numeric_tail: Whether to use numeric tails (~1).
+            parent_cluster: The directory to check for collisions.
+
+        Returns:
+            The predicted 11-character 8.3 name string.
+        """
         return predict_short_name(self, long_name, use_numeric_tail, parent_cluster)
 
     def find_entry_by_83_name(self, target_83_name: str) -> Optional[dict]:
-        """Find a directory entry by its 11-character 8.3 name (no dot)"""
+        """
+        Find a directory entry by its 11-character 8.3 name (no dot).
+
+        Args:
+            target_83_name: The 11-byte name string (e.g., "FILE    TXT").
+
+        Returns:
+            The directory entry dictionary if found, else None.
+        """
         return find_entry_by_83_name(self, target_83_name)
 
     def read_fat(self) -> bytearray:
-        """Read the FAT table"""
+        """
+        Read the FAT table.
+
+        Returns:
+            A bytearray containing the raw FAT data from the first FAT copy.
+        """
         with open(self.image_path, 'rb') as f:
             f.seek(self.fat_start)
             return bytearray(f.read(self.sectors_per_fat * self.bytes_per_sector))
     
     def write_fat(self, fat_data: bytearray):
-        """Write FAT table to both FAT copies and verify"""
+        """
+        Write FAT table to both FAT copies and verify.
+
+        Args:
+            fat_data: The bytearray containing the complete FAT data.
+
+        Raises:
+            FAT12Error: If verification fails after writing.
+        """
         with open(self.image_path, 'r+b') as f:
             for i in range(self.num_fats):
                 offset = self.fat_start + (i * self.sectors_per_fat * self.bytes_per_sector)
@@ -237,7 +309,18 @@ class FAT12Image:
                     raise FAT12Error(f"FAT write verification failed for FAT #{i+1}")
     
     def get_fat_entry(self, fat_data: bytearray, cluster: int) -> int:
-        """Get FAT12 entry for a cluster"""
+        """
+        Get FAT12 entry for a cluster.
+
+        Unpacks the 12-bit value from the packed byte array.
+
+        Args:
+            fat_data: The FAT bytearray.
+            cluster: The cluster index.
+
+        Returns:
+            The 12-bit value for the cluster.
+        """
         offset = cluster + (cluster // 2)
         value = struct.unpack('<H', fat_data[offset:offset+2])[0]
         
@@ -247,7 +330,16 @@ class FAT12Image:
             return value & 0xFFF
     
     def set_fat_entry(self, fat_data: bytearray, cluster: int, value: int):
-        """Set FAT12 entry for a cluster"""
+        """
+        Set FAT12 entry for a cluster.
+
+        Packs the 12-bit value into the byte array, preserving neighbors.
+
+        Args:
+            fat_data: The FAT bytearray (modified in place).
+            cluster: The cluster index.
+            value: The 12-bit value to set.
+        """
         offset = cluster + (cluster // 2)
         current = struct.unpack('<H', fat_data[offset:offset+2])[0]
         
@@ -259,19 +351,47 @@ class FAT12Image:
         fat_data[offset:offset+2] = struct.pack('<H', new_value)
     
     def read_directory(self, cluster: int = None) -> List[dict]:
-        """Read directory entries from root (None) or a specific cluster"""
+        """
+        Read directory entries from root (None) or a specific cluster.
+
+        Args:
+            cluster: The starting cluster of the directory (None for root).
+
+        Returns:
+            List of parsed directory entry dictionaries.
+        """
         return read_directory(self, cluster)
 
     def read_root_directory(self) -> List[dict]:
-        """Read root directory entries (wrapper for read_directory)"""
+        """
+        Read root directory entries.
+
+        Wrapper for read_directory(None).
+
+        Returns:
+            List of parsed directory entry dictionaries from root.
+        """
         return self.read_directory(None)
     
     def read_raw_directory_entries(self):
-        """Read all raw directory entries from disk"""
+        """
+        Read all raw directory entries from disk.
+
+        Returns:
+            List of tuples (index, raw_bytes) for the root directory.
+        """
         return read_raw_directory_entries(self)
     
     def find_free_clusters(self, count: int = None) -> List[int]:
-        """Find free clusters in the FAT. If count is None, find all."""
+        """
+        Find free clusters in the FAT.
+
+        Args:
+            count: Number of clusters to find. If None, finds all.
+
+        Returns:
+            List of free cluster indices.
+        """
         fat_data = self.read_fat()
         free_clusters = []
         
@@ -286,7 +406,12 @@ class FAT12Image:
         return free_clusters
     
     def get_existing_83_names(self) -> List[str]:
-        """Get list of all existing 8.3, 11 byte names (no dot) in the root directory"""
+        """
+        Get list of all existing 8.3 names in the root directory.
+
+        Returns:
+            List of 11-byte name strings (no dot).
+        """
         return get_existing_83_names_in_directory(self, None)
     
     def get_cluster_map(self) -> dict:
@@ -504,11 +629,28 @@ class FAT12Image:
         return True
 
     def get_existing_83_names_in_directory(self, cluster: int = None) -> List[str]:
-        """Get list of all existing 8.3 names in a directory"""
+        """
+        Get list of all existing 8.3 names in a directory.
+
+        Args:
+            cluster: The directory cluster (None for root).
+
+        Returns:
+            List of 11-byte name strings.
+        """
         return get_existing_83_names_in_directory(self, cluster)
 
     def find_free_directory_entries(self, cluster: int = None, required_slots: int = 1) -> int:
-        """Find contiguous free directory entries"""
+        """
+        Find contiguous free directory entries.
+
+        Args:
+            cluster: The directory cluster (None for root).
+            required_slots: Number of contiguous slots needed.
+
+        Returns:
+            The starting index of the free block.
+        """
         return find_free_directory_entries(self, cluster, required_slots)
 
     def create_directory(self, dir_name: str, parent_cluster: int = None, use_numeric_tail: bool = True) -> bool:
@@ -555,11 +697,33 @@ class FAT12Image:
         return delete_directory(self, entry, recursive)
 
     def delete_directory_entry(self, parent_cluster: int, entry_index: int) -> bool:
-        """Delete a directory entry (mark as deleted)"""
+        """
+        Delete a directory entry (mark as deleted).
+
+        Args:
+            parent_cluster: The directory cluster.
+            entry_index: The index of the entry to delete.
+
+        Returns:
+            True on success.
+        """
         return delete_directory_entry(self, parent_cluster, entry_index)
 
     def extract_file(self, entry: dict) -> bytes:
-        """Extract file data from the image"""
+        """
+        Extract file data from the image.
+
+        Follows the cluster chain to read the complete file content.
+
+        Args:
+            entry: The file's directory entry dictionary.
+
+        Returns:
+            The file content as bytes.
+
+        Raises:
+            FAT12CorruptionError: If the cluster chain is broken or loops.
+        """
         data = bytearray()
         
         with open(self.image_path, 'rb') as f:
@@ -592,7 +756,14 @@ class FAT12Image:
     
     @staticmethod
     def create_empty_image(filepath: str, format_key: str = '1.44M', oem_name: str = 'MSDOS5.0'):
-        """Create a blank FAT12 floppy disk image"""
+        """
+        Create a blank FAT12 floppy disk image.
+
+        Args:
+            filepath: Path to save the new image.
+            format_key: Floppy format key (e.g., '1.44M').
+            oem_name: OEM name string for the boot sector.
+        """
         if format_key not in FAT12Image.FORMATS:
             raise ValueError(f"Unknown format: {format_key}")
             
