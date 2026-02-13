@@ -151,10 +151,7 @@ Verified to work on my Yamaha DGX-500 keyboard and Gotek SFR1M44-U100LQD 3.5inch
 
 ## System Requirements
 
-### For Building:
-- Windows 10+, Linux, or macOS
-
-### For Running:
+### For Building and Running:
 - Windows 10+, Linux, or macOS
 
 ---
@@ -196,14 +193,13 @@ Turn off confirmations for faster workflow:
 
 ## Technical Details
 
-**Format:** FAT12 filesystem  
-**Capacity:** 1.44 MB (1,474,560 bytes)  
+**Format:** FAT12 filesystem
 **Max Files:** 224 entries  
 **Filenames:** 8.3 format (auto-converted)
 
 **Compatible With:**
-- Yamaha DGX-500
-- Other Yamaha or other vintage keyboards using FAT12 floppies
+- Yamaha DGX-500 (verified)
+- Other Yamaha or other vintage keyboards using FAT12 floppies (not verified)
 - Any FAT12 1.44 MB floppy images
 
 ---
