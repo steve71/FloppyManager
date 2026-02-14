@@ -304,11 +304,11 @@ class FloppyManagerWindow(QMainWindow):
             properties_action.triggered.connect(self.edit_file_attributes)
             menu.addAction(properties_action)
             menu.addSeparator()
-            
-            copy_action = QAction("Copy", self)
-            copy_action.triggered.connect(self.copy_selected)
-            menu.addAction(copy_action)
-        
+
+        copy_action = QAction("Copy", self)
+        copy_action.triggered.connect(self.copy_selected)
+        menu.addAction(copy_action)
+
         extract_action = QAction("Extract", self)
         extract_action.triggered.connect(self.extract_selected)
         menu.addAction(extract_action)
@@ -1407,58 +1407,63 @@ class FloppyManagerWindow(QMainWindow):
             self.logger.info(f"Successfully deleted {success_count} item(s)")
 
     def copy_selected(self):
-        """Copy the selected file"""
+        """Copy the selected file(s)"""
         if not self.image:
             return
             
         selected_items = self.table.selectedItems()
-        if len(selected_items) != 1:
+        if not selected_items:
             return
-            
-        entry = selected_items[0].data(0, Qt.ItemDataRole.UserRole)
-        if not entry or entry['is_dir']:
-            return
-            
-        try:
-            # Extract file data
-            data = self.image.extract_file(entry)
-            
-            # Determine parent cluster
-            parent_cluster = entry.get('parent_cluster')
-            if parent_cluster == 0: parent_cluster = None
 
-            # Get existing files to check for collisions
-            entries = self.image.read_directory(parent_cluster)
-            existing_names = {e['name'].lower() for e in entries}
-            
-            # Create new name (e.g. "File.txt" -> "File - Copy.txt")
-            name_parts = os.path.splitext(entry['name'])
-            base_name = f"{name_parts[0]} - Copy"
-            extension = name_parts[1]
-            
-            new_name = f"{base_name}{extension}"
-            
-            # Check for collisions and increment if necessary
-            counter = 2
-            while new_name.lower() in existing_names:
-                new_name = f"{base_name} ({counter}){extension}"
-                counter += 1
-            
-            # Write the new file
-            self.image.write_file_to_image(new_name, data, self.use_numeric_tail, None, parent_cluster)
-            self.refresh_file_list()
-            self.status_bar.showMessage(f"Copied: {new_name}")
-            self.logger.info(f"Copied file '{entry['name']}' to '{new_name}'")
-        except FAT12CorruptionError as e:
-            self.logger.error(f"Corruption copying file {entry['name']}: {e}")
-            QMessageBox.critical(self, "Filesystem Corruption", f"Cannot copy file:\n{e}")
-        except FAT12Error as e:
-            self.logger.warning(f"Failed to copy file {entry['name']}: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to copy file: {e}")
+        success_count = 0
+
+        for item in selected_items:
+            entry = item.data(0, Qt.ItemDataRole.UserRole)
+            if not entry or entry['is_dir']:
+                continue
+
+            try:
+                # Extract file data
+                data = self.image.extract_file(entry)
                 
-        except Exception as e:
-            self.logger.error(f"Unexpected error copying file {entry['name']}: {e}", exc_info=True)
-            QMessageBox.critical(self, "Error", f"Failed to copy file: {e}")
+                # Determine parent cluster
+                parent_cluster = entry.get('parent_cluster')
+                if parent_cluster == 0: parent_cluster = None
+
+                # Get existing files to check for collisions
+                entries = self.image.read_directory(parent_cluster)
+                existing_names = {e['name'].lower() for e in entries}
+                
+                # Create new name (e.g. "File.txt" -> "File - Copy.txt")
+                name_parts = os.path.splitext(entry['name'])
+                base_name = f"{name_parts[0]} - Copy"
+                extension = name_parts[1]
+                
+                new_name = f"{base_name}{extension}"
+                
+                # Check for collisions and increment if necessary
+                counter = 2
+                while new_name.lower() in existing_names:
+                    new_name = f"{base_name} ({counter}){extension}"
+                    counter += 1
+                
+                # Write the new file
+                self.image.write_file_to_image(new_name, data, self.use_numeric_tail, None, parent_cluster)
+                success_count += 1
+                self.logger.info(f"Copied file '{entry['name']}' to '{new_name}'")
+            except FAT12CorruptionError as e:
+                self.logger.error(f"Corruption copying file {entry['name']}: {e}")
+                QMessageBox.critical(self, "Filesystem Corruption", f"Cannot copy file:\n{e}")
+            except FAT12Error as e:
+                self.logger.warning(f"Failed to copy file {entry['name']}: {e}")
+                QMessageBox.warning(self, "Error", f"Failed to copy file: {e}")
+            except Exception as e:
+                self.logger.error(f"Unexpected error copying file {entry['name']}: {e}", exc_info=True)
+                QMessageBox.critical(self, "Error", f"Failed to copy file: {e}")
+
+        if success_count > 0:
+            self.refresh_file_list()
+            self.status_bar.showMessage(f"Copied {success_count} file(s)")
 
     def create_new_image(self):
         """Create a new blank floppy disk image"""
