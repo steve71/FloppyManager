@@ -350,6 +350,11 @@ class FAT12Image:
             The 12-bit value for the cluster.
         """
         offset = cluster + (cluster // 2)
+        
+        if offset + 2 > len(fat_data):
+            logger.warning(f"Attempted to read FAT entry for out-of-bounds cluster {cluster}")
+            return 0xFFF # Return EOF to stop chain traversal
+            
         value = struct.unpack('<H', fat_data[offset:offset+2])[0]
         
         if cluster & 1:
@@ -369,6 +374,11 @@ class FAT12Image:
             value: The 12-bit value to set.
         """
         offset = cluster + (cluster // 2)
+        
+        if offset + 2 > len(fat_data):
+            logger.warning(f"Attempted to write FAT entry for out-of-bounds cluster {cluster}")
+            return
+            
         current = struct.unpack('<H', fat_data[offset:offset+2])[0]
         
         if cluster & 1:

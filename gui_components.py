@@ -1031,6 +1031,8 @@ class FileTreeWidget(QTreeWidget):
                 if is_internal and not (event.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier):
                     is_copy = False
                 
+                logger.debug(f"Drop event: is_internal={is_internal}, is_copy={is_copy}, files={len(files)}")
+                
                 # Determine target directory
                 target_item = self.itemAt(event.position().toPoint())
                 parent_cluster = None
@@ -1107,7 +1109,8 @@ class FileTreeWidget(QTreeWidget):
 
                 event.accept()
                 
-                success_count = main_window.add_files_from_list(files, parent_cluster)
+                # Don't refresh yet, we might delete files next
+                success_count = main_window.add_files_from_list(files, parent_cluster, refresh=False)
 
                 # Handle Move (Delete source) if internal and copy was successful
                 if is_internal and not is_copy and success_count == len(files):
@@ -1116,7 +1119,7 @@ class FileTreeWidget(QTreeWidget):
                         try:
                             main_window.image.delete_file(entry)
                             deleted_count += 1
-                        except FAT12Error as e:
+                        except Exception as e:
                             logger.warning(f"Failed to delete source file '{entry.get('name')}' during move: {e}")
                             pass
                     
@@ -1125,6 +1128,9 @@ class FileTreeWidget(QTreeWidget):
                     logger.info(f"Moved {deleted_count} file(s) via drag and drop")
                 elif is_internal and is_copy and success_count > 0:
                     main_window.status_bar.showMessage(f"Copied {success_count} file(s)")
+                    main_window.refresh_file_list()
+                else:
+                    main_window.refresh_file_list()
         else:
             super().dropEvent(event)
 

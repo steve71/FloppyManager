@@ -12,6 +12,7 @@ import sys
 import os
 import shutil
 import zipfile
+import tempfile
 import logging
 from pathlib import Path
 from typing import Optional
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import (
     QTreeWidget, QFileDialog, QMessageBox, QLabel, QStatusBar, QMenu,
     QDialog, QToolBar, QStyle, QHeaderView, QLineEdit
 )
-from PySide6.QtCore import Qt, QSettings, QTimer, QSize
+from PySide6.QtCore import Qt, QSettings, QTimer, QSize, QMimeData, QUrl
 from PySide6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, QColor
 
 # Import the FAT12 handler
@@ -76,6 +77,8 @@ class FloppyManagerWindow(QMainWindow):
         self.image_path = image_path
         self.image = None
         self.log_viewer = None
+        self._last_copy_temp_dir = None
+        self._cut_entries = []
         
         # Track clicks for rename-on-slow-double-click
         self._last_click_time = 0
@@ -288,7 +291,24 @@ class FloppyManagerWindow(QMainWindow):
         
         menu.addSeparator()
         
+        # Check clipboard status
+        clipboard = QApplication.clipboard()
+        mime_data = clipboard.mimeData()
+        has_files = False
+        if mime_data and mime_data.hasUrls():
+            for url in mime_data.urls():
+                if url.isLocalFile():
+                    if os.path.isfile(url.toLocalFile()):
+                        has_files = True
+                        break
+        
         if not selected_items:
+            paste_action = QAction("Paste", self)
+            paste_action.setShortcut(QKeySequence.StandardKey.Paste)
+            paste_action.triggered.connect(self.paste_from_clipboard)
+            paste_action.setEnabled(has_files)
+            menu.addAction(paste_action)
+            
             menu.exec(self.table.viewport().mapToGlobal(position))
             return
         
@@ -305,9 +325,28 @@ class FloppyManagerWindow(QMainWindow):
             menu.addAction(properties_action)
             menu.addSeparator()
 
+        cut_action = QAction("Cut", self)
+        cut_action.setShortcut(QKeySequence.StandardKey.Cut)
+        cut_action.triggered.connect(self.cut_selected)
+        menu.addAction(cut_action)
+
         copy_action = QAction("Copy", self)
-        copy_action.triggered.connect(self.copy_selected)
+        copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+        copy_action.triggered.connect(self.copy_to_clipboard)
         menu.addAction(copy_action)
+
+        paste_action = QAction("Paste", self)
+        paste_action.setShortcut(QKeySequence.StandardKey.Paste)
+        paste_action.triggered.connect(self.paste_from_clipboard)
+        paste_action.setEnabled(has_files)
+        menu.addAction(paste_action)
+
+        menu.addSeparator()
+
+        duplicate_action = QAction("Duplicate", self)
+        duplicate_action.setShortcut("Ctrl+D")
+        duplicate_action.triggered.connect(self.duplicate_selected)
+        menu.addAction(duplicate_action)
 
         extract_action = QAction("Extract", self)
         extract_action.triggered.connect(self.extract_selected)
@@ -320,6 +359,20 @@ class FloppyManagerWindow(QMainWindow):
         menu.addAction(delete_action)
         
         menu.exec(self.table.viewport().mapToGlobal(position))
+
+    def update_edit_menu(self):
+        """Update enabled state of edit menu items"""
+        clipboard = QApplication.clipboard()
+        mime_data = clipboard.mimeData()
+        has_files = False
+        if mime_data and mime_data.hasUrls():
+            for url in mime_data.urls():
+                if url.isLocalFile():
+                    if os.path.isfile(url.toLocalFile()):
+                        has_files = True
+                        break
+        if hasattr(self, 'paste_action'):
+            self.paste_action.setEnabled(has_files)
 
     def create_menus(self):
         """Create menu bar"""
@@ -381,6 +434,7 @@ class FloppyManagerWindow(QMainWindow):
 
         # Edit menu
         edit_menu = menubar.addMenu("&Edit")
+        edit_menu.aboutToShow.connect(self.update_edit_menu)
 
         rename_action = QAction("&Rename", self)
         rename_action.setShortcut(Qt.Key.Key_F2)
@@ -395,6 +449,27 @@ class FloppyManagerWindow(QMainWindow):
         properties_action.setToolTip("Edit file attributes (Alt+Enter)")
         properties_action.triggered.connect(self.edit_file_attributes)
         edit_menu.addAction(properties_action)
+
+        edit_menu.addSeparator()
+
+        cut_action = QAction("Cu&t", self)
+        cut_action.setShortcut(QKeySequence.StandardKey.Cut)
+        cut_action.triggered.connect(self.cut_selected)
+        edit_menu.addAction(cut_action)
+
+        copy_action = QAction("&Copy", self)
+        copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+        copy_action.triggered.connect(self.copy_to_clipboard)
+        edit_menu.addAction(copy_action)
+
+        paste_action = QAction("&Paste", self)
+        paste_action.setShortcut(QKeySequence.StandardKey.Paste)
+        paste_action.triggered.connect(self.paste_from_clipboard)
+        edit_menu.addAction(paste_action)
+        self.paste_action = QAction("&Paste", self)
+        self.paste_action.setShortcut(QKeySequence.StandardKey.Paste)
+        self.paste_action.triggered.connect(self.paste_from_clipboard)
+        edit_menu.addAction(self.paste_action)
 
         # View menu
         view_menu = menubar.addMenu("&View")
@@ -551,6 +626,15 @@ class FloppyManagerWindow(QMainWindow):
             palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
             palette.setColor(QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
             palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(127, 127, 127))
+            
+            # Set Disabled colors explicitly
+            disabled_color = QColor(127, 127, 127)
+            palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, disabled_color)
+            palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, disabled_color)
+            palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, disabled_color)
+            palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Highlight, QColor(80, 80, 80))
+            palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.HighlightedText, disabled_color)
+            
             app.setPalette(palette)
             
             # Update toolbar for dark mode
@@ -573,6 +657,15 @@ class FloppyManagerWindow(QMainWindow):
             palette.setColor(QPalette.ColorRole.Link, QColor(0, 0, 255))
             palette.setColor(QPalette.ColorRole.Highlight, QColor(0, 120, 215))
             palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+            
+            # Set Disabled colors explicitly
+            disabled_color = QColor(160, 160, 160)
+            palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, disabled_color)
+            palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, disabled_color)
+            palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, disabled_color)
+            palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Highlight, QColor(200, 200, 200))
+            palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.HighlightedText, disabled_color)
+            
             app.setPalette(palette)
             
             # Update toolbar for light mode
@@ -996,25 +1089,26 @@ class FloppyManagerWindow(QMainWindow):
         if not filenames:
             return
 
-        # Determine parent cluster from selection
-        parent_cluster = None
-        selected_items = self.table.selectedItems()
-        if selected_items:
-            item = selected_items[0]
-            entry = item.data(0, Qt.ItemDataRole.UserRole)
-            if entry:
-                if entry['is_dir']:
-                    parent_cluster = entry['cluster']
-                else:
-                    parent_cluster = entry.get('parent_cluster')
-                    if parent_cluster == 0: parent_cluster = None
+        self.add_files_from_list(filenames)
 
-        self.add_files_from_list(filenames, parent_cluster)
-
-    def add_files_from_list(self, filenames: list, parent_cluster: int = None):
-        """Add files from a list of file paths (used by both dialog and drag-drop)"""
+    def add_files_from_list(self, filenames: list, parent_cluster: int = -1, rename_on_collision: bool = False, refresh: bool = True):
+        """Add files from a list of file paths (used by dialog, drag-drop, and paste)"""
         if not self.image:
             return 0
+
+        # Determine parent cluster from selection if not specified
+        if parent_cluster == -1:
+            parent_cluster = None
+            selected_items = self.table.selectedItems()
+            if selected_items:
+                item = selected_items[0]
+                entry = item.data(0, Qt.ItemDataRole.UserRole)
+                if entry:
+                    if entry['is_dir']:
+                        parent_cluster = entry['cluster']
+                    else:
+                        parent_cluster = entry.get('parent_cluster')
+                        if parent_cluster == 0: parent_cluster = None
 
         # Sort files by name (case-insensitive) to ensure deterministic order
         filenames.sort(key=lambda x: Path(x).name.lower())
@@ -1023,12 +1117,11 @@ class FloppyManagerWindow(QMainWindow):
         fail_count = 0
 
         for filepath in filenames:
+            path_obj = Path(filepath)
+            original_name = path_obj.name
             try:
                 with open(filepath, 'rb') as f:
                     data = f.read()
-
-                path_obj = Path(filepath)
-                original_name = path_obj.name
 
                 # Get modification time
                 try:
@@ -1055,23 +1148,42 @@ class FloppyManagerWindow(QMainWindow):
                     collision_entry = next((e for e in entries if e['short_name'].upper() == short_name_83), None)
 
                 if collision_entry:
-                    if self.confirm_replace:
-                        msg = f"The file '{original_name}' will be saved with 8.3 name '{short_display}', which already exists"
-                        if collision_entry['name'] != collision_entry['short_name']:
-                            msg += f" (long name: '{collision_entry['name']}')"
-                        msg += ".\n\nDo you want to replace it?"
+                    if rename_on_collision:
+                        # Generate new name to avoid collision (e.g. "File - Copy.txt")
+                        name_parts = os.path.splitext(original_name)
+                        base_name = f"{name_parts[0]} - Copy"
+                        extension = name_parts[1]
                         
-                        response = QMessageBox.question(
-                            self,
-                            "File Exists",
-                            msg,
-                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                        )
-                        if response == QMessageBox.StandardButton.No:
-                            continue
+                        new_name = f"{base_name}{extension}"
+                        
+                        # Check for collisions with new name
+                        existing_names_lfn = {e['name'].lower() for e in entries}
+                        
+                        counter = 2
+                        while new_name.lower() in existing_names_lfn:
+                            new_name = f"{base_name} ({counter}){extension}"
+                            counter += 1
+                        
+                        original_name = new_name
+                        # Do not delete existing file, we are creating a copy
+                    else:
+                        if self.confirm_replace:
+                            msg = f"The file '{original_name}' will be saved with 8.3 name '{short_display}', which already exists"
+                            if collision_entry['name'] != collision_entry['short_name']:
+                                msg += f" (long name: '{collision_entry['name']}')"
+                            msg += ".\n\nDo you want to replace it?"
+                            
+                            response = QMessageBox.question(
+                                self,
+                                "File Exists",
+                                msg,
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                            )
+                            if response == QMessageBox.StandardButton.No:
+                                continue
 
-                    # Delete the existing file
-                    self.image.delete_file(collision_entry)
+                        # Delete the existing file
+                        self.image.delete_file(collision_entry)
 
                 # Write the new file
                 self.image.write_file_to_image(original_name, data, self.use_numeric_tail, modification_dt, parent_cluster)
@@ -1092,7 +1204,8 @@ class FloppyManagerWindow(QMainWindow):
                 self.logger.error(f"Unexpected error writing {original_name}: {e}", exc_info=True)
                 QMessageBox.critical(self, "Error", f"Failed to add {Path(filepath).name}: {e}")
 
-        self.refresh_file_list()
+        if refresh:
+            self.refresh_file_list()
 
         if success_count > 0:
             self.status_bar.showMessage(f"Added {success_count} file(s)")
@@ -1406,8 +1519,8 @@ class FloppyManagerWindow(QMainWindow):
             self.status_bar.showMessage(f"Deleted {success_count} item(s)")
             self.logger.info(f"Successfully deleted {success_count} item(s)")
 
-    def copy_selected(self):
-        """Copy the selected file(s)"""
+    def duplicate_selected(self):
+        """Duplicate the selected file(s) inside the image"""
         if not self.image:
             return
             
@@ -1450,13 +1563,13 @@ class FloppyManagerWindow(QMainWindow):
                 # Write the new file
                 self.image.write_file_to_image(new_name, data, self.use_numeric_tail, None, parent_cluster)
                 success_count += 1
-                self.logger.info(f"Copied file '{entry['name']}' to '{new_name}'")
+                self.logger.info(f"Duplicated file '{entry['name']}' to '{new_name}'")
             except FAT12CorruptionError as e:
-                self.logger.error(f"Corruption copying file {entry['name']}: {e}")
-                QMessageBox.critical(self, "Filesystem Corruption", f"Cannot copy file:\n{e}")
+                self.logger.error(f"Corruption duplicating file {entry['name']}: {e}")
+                QMessageBox.critical(self, "Filesystem Corruption", f"Cannot duplicate file:\n{e}")
             except FAT12Error as e:
-                self.logger.warning(f"Failed to copy file {entry['name']}: {e}")
-                QMessageBox.warning(self, "Error", f"Failed to copy file: {e}")
+                self.logger.warning(f"Failed to duplicate file {entry['name']}: {e}")
+                QMessageBox.warning(self, "Error", f"Failed to duplicate file: {e}")
             except Exception as e:
                 self.logger.error(f"Unexpected error copying file {entry['name']}: {e}", exc_info=True)
                 QMessageBox.critical(self, "Error", f"Failed to copy file: {e}")
@@ -1464,6 +1577,140 @@ class FloppyManagerWindow(QMainWindow):
         if success_count > 0:
             self.refresh_file_list()
             self.status_bar.showMessage(f"Copied {success_count} file(s)")
+
+    def cut_selected(self):
+        """Cut selected files (copy to clipboard and mark for deletion on paste)"""
+        if not self.image:
+            return
+            
+        # Perform copy to clipboard first
+        self.copy_to_clipboard()
+        
+        # Store selected entries for later deletion upon paste
+        self._cut_entries = []
+        selected_items = self.table.selectedItems()
+        for item in selected_items:
+            entry = item.data(0, Qt.ItemDataRole.UserRole)
+            if entry:
+                self._cut_entries.append(entry)
+        
+        self.status_bar.showMessage(f"Cut {len(self._cut_entries)} file(s) to clipboard")
+
+    def copy_to_clipboard(self):
+        """Copy selected files to system clipboard"""
+        if not self.image:
+            return
+
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            return
+
+        # Clear any pending cut operation since we are doing a new copy
+        self._cut_entries = []
+
+        # Cleanup previous temp dir
+        if self._last_copy_temp_dir and os.path.exists(self._last_copy_temp_dir):
+            try:
+                shutil.rmtree(self._last_copy_temp_dir)
+            except:
+                pass
+        
+        self._last_copy_temp_dir = tempfile.mkdtemp(prefix="fat12_copy_")
+        
+        urls = []
+        for item in selected_items:
+            entry = item.data(0, Qt.ItemDataRole.UserRole)
+            if entry and not entry['is_dir']:
+                try:
+                    data = self.image.extract_file(entry)
+                    filename = entry['name']
+                    filepath = os.path.join(self._last_copy_temp_dir, filename)
+                    with open(filepath, 'wb') as f:
+                        f.write(data)
+                    urls.append(QUrl.fromLocalFile(filepath))
+                except Exception as e:
+                    self.logger.warning(f"Failed to extract {entry['name']} for copy: {e}")
+
+        if urls:
+            mime_data = QMimeData()
+            mime_data.setUrls(urls)
+            QApplication.clipboard().setMimeData(mime_data)
+            self.status_bar.showMessage(f"Copied {len(urls)} file(s) to clipboard")
+
+    def paste_from_clipboard(self):
+        """Paste files from system clipboard"""
+        if not self.image:
+            return
+
+        mime_data = QApplication.clipboard().mimeData()
+        if not mime_data or not mime_data.hasUrls():
+            self.status_bar.showMessage("Clipboard is empty or contains no files")
+            return
+
+        files = []
+        for url in mime_data.urls():
+            if url.isLocalFile():
+                fpath = url.toLocalFile()
+                if os.path.isfile(fpath):
+                    files.append(fpath)
+
+        if files:
+            # Determine target parent cluster from selection (same logic as add_files_from_list)
+            parent_cluster = None
+            selected_items = self.table.selectedItems()
+            if selected_items:
+                item = selected_items[0]
+                entry = item.data(0, Qt.ItemDataRole.UserRole)
+                if entry:
+                    if entry['is_dir']:
+                        parent_cluster = entry['cluster']
+                    else:
+                        parent_cluster = entry.get('parent_cluster')
+                        if parent_cluster == 0: parent_cluster = None
+
+            # If this is a paste from a cut operation, check if source == destination
+            if self._cut_entries:
+                # Check if we are pasting into the same directory as the source
+                # We assume all cut items are from the same directory (current view)
+                first_cut = self._cut_entries[0]
+                src_parent = first_cut.get('parent_cluster')
+                if src_parent == 0: src_parent = None
+                
+                if src_parent == parent_cluster:
+                    self.status_bar.showMessage("Source and destination are the same. Move cancelled.")
+                    self._cut_entries = []
+                    return
+
+            # Check if this is an internal paste (source is our temp dir)
+            # If so, enable rename_on_collision to support "Copy/Paste to same folder -> Duplicate"
+            rename_on_collision = False
+            if self._last_copy_temp_dir and files:
+                try:
+                    file_parent = Path(files[0]).parent.resolve()
+                    temp_parent = Path(self._last_copy_temp_dir).resolve()
+                    if file_parent == temp_parent:
+                        rename_on_collision = True
+                except Exception:
+                    pass
+
+            # Add files (Copy)
+            success_count = self.add_files_from_list(files, parent_cluster, rename_on_collision)
+            
+            # If this was a cut operation and paste was successful, delete originals
+            if self._cut_entries and success_count == len(files):
+                deleted_count = 0
+                for entry in self._cut_entries:
+                    try:
+                        self.image.delete_file(entry)
+                        deleted_count += 1
+                    except Exception as e:
+                        self.logger.warning(f"Failed to delete cut file {entry['name']}: {e}")
+                
+                self._cut_entries = [] # Clear after move
+                self.refresh_file_list()
+                self.status_bar.showMessage(f"Moved {deleted_count} file(s)")
+        else:
+            self.status_bar.showMessage("Clipboard contains no valid files")
 
     def create_new_image(self):
         """Create a new blank floppy disk image"""
@@ -1685,6 +1932,7 @@ class FloppyManagerWindow(QMainWindow):
         <li>Drag and drop support (Hold Ctrl to copy)</li>
         <li>View and edit file attributes</li>
         <li>Rename files (Windows-style inline)</li>
+        <li>Copy, Paste, and Duplicate files</li>
         <li>Delete files</li>
         <li>Extract files (selected, all, or to ZIP)</li>
         <li>Format disk</li>
@@ -1699,15 +1947,29 @@ class FloppyManagerWindow(QMainWindow):
         </table>
 
         <p><b>Keyboard Shortcuts:</b></p>
+        <table border="0" width="100%">
+        <tr>
+        <td valign="top" width="50%">
         <ul>
         <li>Ctrl+A - Select all</li>
         <li>Ctrl+N - Create new image</li>
         <li>Ctrl+O - Open image</li>
         <li>Ctrl+W - Close image</li>
+        <li>Ctrl+X - Cut files</li>
+        <li>Ctrl+C - Copy files</li>
+        </ul>
+        </td>
+        <td valign="top" width="50%">
+        <ul>
+        <li>Ctrl+V - Paste files</li>
+        <li>Ctrl+D - Duplicate files</li>
         <li>Ctrl+Shift+S - Save image as</li>
         <li>Ctrl+Shift+F - Format disk</li>
         <li>Del/Backspace - Delete selected files</li>
         </ul>
+        </td>
+        </tr>
+        </table>
 
         <p align="center"><small>© 2026 Stephen P Smith | MIT License</small></p>
         """
@@ -1718,6 +1980,13 @@ class FloppyManagerWindow(QMainWindow):
         # Save window geometry and State
         self.settings.setValue('window_geometry', self.saveGeometry())
         self.settings.setValue('window_state', self.saveState())
+        
+        # Cleanup temp dir
+        if self._last_copy_temp_dir and os.path.exists(self._last_copy_temp_dir):
+            try:
+                shutil.rmtree(self._last_copy_temp_dir)
+            except:
+                pass
 
         event.accept()
 
