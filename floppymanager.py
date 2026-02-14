@@ -280,16 +280,6 @@ class FloppyManagerWindow(QMainWindow):
         delete_all_action.setStatusTip("Delete all files from the disk")
         delete_all_action.triggered.connect(self.delete_all)
         toolbar.addAction(delete_all_action)
-        
-        toolbar.addSeparator()
-        
-        # === VIEW/UTILITY GROUP ===
-
-        # Refresh
-        refresh_action = QAction(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload), "Refresh", self)
-        refresh_action.setStatusTip("Reload the file list")
-        refresh_action.triggered.connect(self.refresh_file_list)
-        toolbar.addAction(refresh_action)
 
     def show_context_menu(self, position):
         """Show context menu for table"""
