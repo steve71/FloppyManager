@@ -302,47 +302,52 @@ def find_free_directory_entries(fs, cluster: int = None, required_slots: int = 1
     """
     consecutive = 0
     start_index = -1
-    last_index = -1
     
-    for i, data in iter_directory_entries(fs, cluster):
-        last_index = i
+    # First pass: find a block of 0xE5s or the start of 0x00s
+    first_free_at_end = -1
+    
+    # We must iterate the whole directory to know its size for expansion calculations
+    all_entries = list(iter_directory_entries(fs, cluster))
+    
+    for i, data in all_entries:
         if data[0] == 0x00:
-            # End of directory found, all subsequent entries are free.
-            if consecutive == 0:
-                start_index = i
+            if first_free_at_end == -1:
+                first_free_at_end = i
+            # Don't break, we are just finding the start of the end block
             
-            # For root directory, check if there's enough space to the end.
-            if cluster is None or cluster == 0:
-                if fs.root_entries - start_index >= required_slots:
-                    return start_index
-                else:
-                    return -1 # Not enough space in root directory
-            else:
-                # For subdirectories, we can expand later, so return the start.
-                return start_index
-
-        if data[0] == 0xE5:
-            if consecutive == 0:
-                start_index = i
-            consecutive += 1
-            if consecutive >= required_slots:
-                return start_index
-        else:
+        elif data[0] == 0xE5:
+            if first_free_at_end == -1: # Only count 0xE5s if before the 0x00 block
+                if consecutive == 0:
+                    start_index = i
+                consecutive += 1
+                if consecutive >= required_slots:
+                    return start_index # Found a suitable block of deleted entries
+            
+        else: # Used entry
             consecutive = 0
             start_index = -1
+
+    # If we're here, no large-enough 0xE5 block was found.
+    # Our best candidate is the free block at the end.
+    if first_free_at_end != -1:
+        start_index = first_free_at_end
+    elif start_index == -1: # Directory is completely full
+        start_index = len(all_entries)
+
+    total_allocated_slots = len(all_entries)
+    available_slots = total_allocated_slots - start_index
     
-    # If we are here, we ran out of allocated slots in the directory
-    
-    # Root directory cannot be expanded
+    if available_slots >= required_slots:
+        return start_index
+
+    # If we need more slots, we must expand (subdirs only)
     if cluster is None or cluster == 0:
+        # For root dir, we cannot expand, so if we're here, it's full.
         logger.warning("Root directory is full and cannot be expanded")
         raise FAT12Error("Root directory is full")
         
     # Subdirectory expansion logic
-    if start_index == -1:
-        start_index = last_index + 1
-        
-    needed = required_slots - consecutive
+    needed = required_slots - available_slots
     entries_per_cluster = fs.bytes_per_cluster // 32
     clusters_needed = (needed + entries_per_cluster - 1) // entries_per_cluster
     
@@ -373,12 +378,7 @@ def find_free_directory_entries(fs, cluster: int = None, required_slots: int = 1
         curr = new_cluster
         
         # Zero out the new cluster
-        with open(fs.image_path, 'r+b') as f:
-            offset = fs.data_start + ((new_cluster - 2) * fs.bytes_per_cluster)
-            f.seek(offset)
-            f.write(b'\x00' * fs.bytes_per_cluster)
-            f.flush()
-            os.fsync(f.fileno())
+        fs.zero_out_cluster(new_cluster)
             
     fs.write_fat(fat_data)
     
@@ -488,7 +488,7 @@ def write_directory_entries(fs, parent_cluster: int, entry_index: int,
             
             # Calculate start position
             start_cluster_idx = entry_index // entries_per_cluster
-            offset_in_cluster = entry_index % entries_per_cluster
+            start_offset_in_cluster = entry_index % entries_per_cluster
             
             # Navigate to the correct cluster
             fat_data = fs.read_fat()
@@ -500,21 +500,23 @@ def write_directory_entries(fs, parent_cluster: int, entry_index: int,
             
             # Write entries
             all_entries = lfn_entries + [short_entry]
+
+            # This is the index within the current cluster we are writing to.
+            # It starts at `start_offset_in_cluster` and increments.
+            idx_in_cluster = start_offset_in_cluster
             
             for i, entry_data in enumerate(all_entries):
-                current_idx_in_cluster = offset_in_cluster + i
-                
-                if current_idx_in_cluster >= entries_per_cluster:
+                if idx_in_cluster >= entries_per_cluster:
                     current_cluster = fs.get_fat_entry(fat_data, current_cluster)
                     if current_cluster >= 0xFF8:
                         logger.error(f"Broken directory chain while writing entry part {i}")
                         raise FAT12CorruptionError(f"Broken directory chain while writing entry part {i}")
-                    offset_in_cluster = 0
-                    current_idx_in_cluster = 0
+                    idx_in_cluster = 0 # Reset index for new cluster
                 
                 cluster_offset = fs.data_start + ((current_cluster - 2) * fs.bytes_per_cluster)
-                f.seek(cluster_offset + (current_idx_in_cluster * 32))
+                f.seek(cluster_offset + (idx_in_cluster * 32))
                 f.write(entry_data)
+                idx_in_cluster += 1
             f.flush()
             os.fsync(f.fileno())
 

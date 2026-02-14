@@ -334,6 +334,19 @@ class FAT12Image:
                 if read_data != fat_data:
                     logger.critical(f"FAT write verification failed for FAT #{i+1}")
                     raise FAT12Error(f"FAT write verification failed for FAT #{i+1}")
+
+    def zero_out_cluster(self, cluster: int):
+        """Writes zeros to an entire cluster on disk."""
+        logger.debug(f"Zeroing out cluster {cluster}")
+        if cluster < 2:
+            logger.warning(f"Attempted to zero out invalid cluster {cluster}")
+            return
+        with open(self.image_path, 'r+b') as f:
+            offset = self.data_start + ((cluster - 2) * self.bytes_per_cluster)
+            f.seek(offset)
+            f.write(b'\x00' * self.bytes_per_cluster)
+            f.flush()
+            os.fsync(f.fileno())
     
     def get_fat_entry(self, fat_data: bytearray, cluster: int) -> int:
         """
@@ -571,17 +584,6 @@ class FAT12Image:
         """
         logger.info(f"Writing file '{filename}' ({len(data)} bytes)")
         
-        # Calculate clusters needed
-        clusters_needed = (len(data) + self.bytes_per_cluster - 1) // self.bytes_per_cluster
-        if clusters_needed == 0:
-            clusters_needed = 1  # Even empty files need at least one cluster
-        
-        # Find free clusters
-        free_clusters = self.find_free_clusters(clusters_needed)
-        if len(free_clusters) < clusters_needed:
-            logger.warning(f"Disk full: needed {clusters_needed} clusters, found {len(free_clusters)}")
-            raise FAT12Error("Disk full (not enough free clusters)")
-        
         # Get existing 8.3 names to avoid collisions
         existing_83_names = get_existing_83_names_in_directory(self, parent_cluster)
         
@@ -604,9 +606,26 @@ class FAT12Image:
         # Calculate total entries needed
         total_entries_needed = len(lfn_entries) + 1  # LFN entries + short entry
         
-        # Find free entries
+        # Find free directory entries first. This is critical, as it may expand the directory
+        # and consume a free cluster, updating the FAT in the process.
         entry_index = find_free_directory_entries(self, parent_cluster, total_entries_needed)
             
+        # Now that the directory is settled, find clusters for the file's data.
+        free_clusters = []
+        if len(data) > 0:
+            clusters_needed = (len(data) + self.bytes_per_cluster - 1) // self.bytes_per_cluster
+            free_clusters = self.find_free_clusters(clusters_needed)
+            if len(free_clusters) < clusters_needed:
+                logger.warning(f"Disk full: needed {clusters_needed} clusters for data, found {len(free_clusters)}")
+                # Attempt to roll back by deleting the directory entries we were about to write
+                try:
+                    # This is a best-effort cleanup
+                    for i in range(total_entries_needed):
+                        delete_directory_entry(self, parent_cluster, entry_index + i)
+                except Exception as e:
+                    logger.error(f"Failed to roll back directory entry allocation during disk full error: {e}")
+                raise FAT12Error("Disk full (not enough free clusters for file data)")
+
         # Create short directory entry
         entry = bytearray(32)
         entry[0:DIR_SHORT_NAME_LEN] = short_name_bytes
