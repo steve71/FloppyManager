@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QDialog, QToolBar, QStyle, QHeaderView, QLineEdit
 )
 from PySide6.QtCore import Qt, QSettings, QTimer, QSize, QMimeData, QUrl
-from PySide6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, QColor
+from PySide6.QtGui import QIcon, QAction, QKeySequence, QActionGroup, QPalette, QColor, QPainter, QPixmap
 
 # Import the FAT12 handler
 from fat12_handler import FAT12Image
@@ -838,6 +838,13 @@ class FloppyManagerWindow(QMainWindow):
         elif event.key() == Qt.Key.Key_Return and event.modifiers() == Qt.KeyboardModifier.AltModifier:
             # Alt+Return opens properties dialog
             self.edit_file_attributes()
+        elif event.key() == Qt.Key.Key_Escape:
+            # Cancel cut operation
+            if self._cut_entries:
+                self._cut_entries = []
+                self.refresh_file_list()
+                self.status_bar.showMessage("Cut operation cancelled")
+            self.table.clearSelection()
         else:
             # Call the original keyPressEvent
             QTreeWidget.keyPressEvent(self.table, event)
@@ -865,6 +872,41 @@ class FloppyManagerWindow(QMainWindow):
     def on_search_text_changed(self, text):
         """Handle search text changes"""
         self.refresh_file_list()
+
+    def _is_entry_cut(self, entry):
+        """Check if an entry is in the cut list"""
+        for cut_entry in self._cut_entries:
+            # Compare parent cluster and name
+            p1 = cut_entry.get('parent_cluster')
+            if p1 == 0: p1 = None
+            p2 = entry.get('parent_cluster')
+            if p2 == 0: p2 = None
+            
+            if p1 == p2 and cut_entry.get('name') == entry.get('name'):
+                return True
+        return False
+
+    def _dim_item(self, item, dim):
+        """Visually dim or undim an item"""
+        if dim:
+            # Dim text
+            color = QColor(self.palette().text().color())
+            color.setAlpha(128) # 50% opacity
+            
+            # Dim icon
+            icon = item.icon(0)
+            if not icon.isNull():
+                pixmap = icon.pixmap(16, 16)
+                transparent = QPixmap(pixmap.size())
+                transparent.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(transparent)
+                painter.setOpacity(0.5)
+                painter.drawPixmap(0, 0, pixmap)
+                painter.end()
+                item.setIcon(0, QIcon(transparent))
+        
+            for col in range(item.columnCount()):
+                item.setForeground(col, color)
 
     def refresh_file_list(self):
         """Refresh the file list from the image"""
@@ -1006,6 +1048,10 @@ class FloppyManagerWindow(QMainWindow):
 
                         # Icon & Recursion
                         item.setIcon(0, self.icon_provider.get_icon(entry))
+                        
+                        # Check if cut
+                        if self._is_entry_cut(entry):
+                            self._dim_item(item, True)
                         
                         if entry['is_dir']:
                             stack.append((item, entry['cluster']))
@@ -1593,6 +1639,7 @@ class FloppyManagerWindow(QMainWindow):
             entry = item.data(0, Qt.ItemDataRole.UserRole)
             if entry:
                 self._cut_entries.append(entry)
+                self._dim_item(item, True)
         
         self.status_bar.showMessage(f"Cut {len(self._cut_entries)} file(s) to clipboard")
 
@@ -1679,6 +1726,8 @@ class FloppyManagerWindow(QMainWindow):
                 if src_parent == parent_cluster:
                     self.status_bar.showMessage("Source and destination are the same. Move cancelled.")
                     self._cut_entries = []
+                    QApplication.clipboard().clear()
+                    self.refresh_file_list()
                     return
 
             # Check if this is an internal paste (source is our temp dir)
@@ -1707,6 +1756,7 @@ class FloppyManagerWindow(QMainWindow):
                         self.logger.warning(f"Failed to delete cut file {entry['name']}: {e}")
                 
                 self._cut_entries = [] # Clear after move
+                QApplication.clipboard().clear()
                 self.refresh_file_list()
                 self.status_bar.showMessage(f"Moved {deleted_count} file(s)")
         else:
