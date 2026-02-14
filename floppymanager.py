@@ -426,7 +426,8 @@ class FloppyManagerWindow(QMainWindow):
         file_menu.addAction(format_action)
 
         defrag_action = QAction("&Defragment Disk", self)
-        defrag_action.setToolTip("Optimize disk by making all files contiguous")
+        defrag_action.setShortcut("Ctrl+Shift+D")
+        defrag_action.setToolTip("Optimize disk by making all files contiguous (Ctrl+Shift+D)")
         defrag_action.triggered.connect(self.defragment_disk)
         file_menu.addAction(defrag_action)
 
@@ -782,12 +783,6 @@ class FloppyManagerWindow(QMainWindow):
             self,
             "Reset Settings",
             "Reset all settings to their default values?\n\n"
-            "This will reset:\n"
-            "• Confirmation dialogs (enabled)\n"
-            "• Numeric tail mode (disabled)\n"
-            "• Theme (Light)\n"
-            "• Clusters per row (32)\n"
-            "• Window size and position\n\n"
             "The application will need to restart for all changes to take effect.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
@@ -2255,15 +2250,16 @@ class FloppyManagerWindow(QMainWindow):
         <li>Ctrl+W - Close image</li>
         <li>Ctrl+X - Cut files</li>
         <li>Ctrl+C - Copy files</li>
+        <li>Ctrl+V - Paste files</li>
         </ul>
         </td>
         <td valign="top" width="50%">
         <ul>
-        <li>Ctrl+V - Paste files</li>
         <li>Ctrl+D - Duplicate files</li>
         <li>Ctrl+Q - Exit FloppyManager</li>
         <li>Ctrl+Shift+S - Save image as</li>
         <li>Ctrl+Shift+F - Format disk</li>
+        <li>Ctrl+Shift+D - Defragment disk</li>
         <li>Del/Backspace - Delete selected files</li>
         </ul>
         </td>
