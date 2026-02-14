@@ -42,6 +42,7 @@ from gui.styles import (get_dark_palette, get_light_palette,
                         dark_info_label_stylesheet, light_info_label_stylesheet)
 
 from gui.about import about_html
+from gui.clipboard_manager import ClipboardManager
 
 class FloppyManagerWindow(QMainWindow):
     """Main window for the floppy manager"""
@@ -83,9 +84,10 @@ class FloppyManagerWindow(QMainWindow):
         self.image_path = image_path
         self.image = None
         self.log_viewer = None
-        self._last_copy_temp_dir = None
-        self._cut_entries = []
-        self._clipboard_source_cluster = None
+        
+        # Initialize clipboard manager
+        self.clipboard_mgr = ClipboardManager(self.logger)
+        self._cut_entries = []  # Keep for UI dimming
         
         # Register cleanup on exit
         atexit.register(self._cleanup_temp_dir)
@@ -302,15 +304,7 @@ class FloppyManagerWindow(QMainWindow):
         menu.addSeparator()
         
         # Check clipboard status
-        clipboard = QApplication.clipboard()
-        mime_data = clipboard.mimeData()
-        has_files = False
-        if mime_data and mime_data.hasUrls():
-            for url in mime_data.urls():
-                if url.isLocalFile():
-                    if os.path.isfile(url.toLocalFile()):
-                        has_files = True
-                        break
+        has_files = self.clipboard_mgr.has_clipboard_data()
         
         if not selected_items:
             paste_action = QAction("Paste", self)
@@ -372,15 +366,7 @@ class FloppyManagerWindow(QMainWindow):
 
     def update_edit_menu(self):
         """Update enabled state of edit menu items"""
-        clipboard = QApplication.clipboard()
-        mime_data = clipboard.mimeData()
-        has_files = False
-        if mime_data and mime_data.hasUrls():
-            for url in mime_data.urls():
-                if url.isLocalFile():
-                    if os.path.isfile(url.toLocalFile()):
-                        has_files = True
-                        break
+        has_files = self.clipboard_mgr.has_clipboard_data()
         if hasattr(self, 'paste_action'):
             self.paste_action.setEnabled(has_files)
 
@@ -739,13 +725,7 @@ class FloppyManagerWindow(QMainWindow):
         # Clear any pending cut operation from previous image
         if self._cut_entries:
             self._cut_entries = []
-            if self._last_copy_temp_dir and os.path.exists(self._last_copy_temp_dir):
-                try:
-                    shutil.rmtree(self._last_copy_temp_dir)
-                except Exception as e:
-                    self.logger.warning(f"Failed to cleanup temp dir: {e}")
-            self._last_copy_temp_dir = None
-            self._clipboard_source_cluster = None
+            self.clipboard_mgr.cleanup()
             QApplication.clipboard().clear()
         
         try:
@@ -791,16 +771,7 @@ class FloppyManagerWindow(QMainWindow):
     
     def _cleanup_temp_dir(self):
         """Cleanup temporary directory used for clipboard operations"""
-        if self._last_copy_temp_dir and os.path.exists(self._last_copy_temp_dir):
-            try:
-                shutil.rmtree(self._last_copy_temp_dir)
-                if hasattr(self, 'logger'):
-                    self.logger.info(f"Cleaned up temp directory: {self._last_copy_temp_dir}")
-            except Exception as e:
-                if hasattr(self, 'logger'):
-                    self.logger.warning(f"Failed to cleanup temp dir: {e}")
-            finally:
-                self._last_copy_temp_dir = None
+        self.clipboard_mgr.cleanup()
 
     def _dim_item(self, item, dim):
         """Visually dim or undim an item"""
@@ -1589,43 +1560,42 @@ class FloppyManagerWindow(QMainWindow):
         if not selected_items:
             return
         
-        # Count files vs directories
-        file_count = 0
-        dir_count = 0
+        # Get selected entries
+        selected_entries = []
         for item in selected_items:
             entry = item.data(0, Qt.ItemDataRole.UserRole)
             if entry:
-                if entry['is_dir']:
-                    dir_count += 1
-                else:
-                    file_count += 1
+                selected_entries.append(entry)
         
-        # Warn if directories were selected
-        if dir_count > 0:
+        if not selected_entries:
+            return
+        
+        # Use clipboard manager for cut operation
+        result = self.clipboard_mgr.cut_files(selected_entries, self.image)
+        
+        # Update local cut entries for UI dimming
+        self._cut_entries = self.clipboard_mgr.get_cut_entries()
+        
+        # Dim the cut items visually
+        if self._cut_entries:
+            for item in selected_items:
+                entry = item.data(0, Qt.ItemDataRole.UserRole)
+                if entry and not entry['is_dir']:
+                    self._dim_item(item, True)
+        
+        # Show warning if directories were excluded
+        if result.excluded_dirs > 0:
             QMessageBox.information(
                 self,
                 "Directories Not Supported",
-                f"Cut/Copy operations currently support files only.\n\n"
-                f"{dir_count} director{'y' if dir_count == 1 else 'ies'} will be excluded."
+                f"Cut operations currently support files only.\n\n"
+                f"{result.excluded_dirs} director{'y' if result.excluded_dirs == 1 else 'ies'} "
+                f"will be excluded."
             )
         
-        if file_count == 0:
-            self.status_bar.showMessage("No files selected to cut")
-            return
-            
-        # Perform copy to clipboard first
-        self.copy_to_clipboard()
-        
-        # Store selected entries for later deletion upon paste
-        self._cut_entries = []
-        for item in selected_items:
-            entry = item.data(0, Qt.ItemDataRole.UserRole)
-            # Only cut files, as we don't support folder copy/paste yet
-            if entry and not entry['is_dir']:
-                self._cut_entries.append(entry)
-                self._dim_item(item, True)
-        
-        self.status_bar.showMessage(f"Cut {len(self._cut_entries)} file(s) to clipboard")
+        # Update status bar
+        if result.success:
+            self.status_bar.showMessage(result.message)
 
     def copy_to_clipboard(self):
         """Copy selected files to system clipboard"""
@@ -1636,248 +1606,183 @@ class FloppyManagerWindow(QMainWindow):
         if not selected_items:
             return
         
-        # Count files vs directories
-        file_count = 0
-        dir_count = 0
+        # Get selected entries
+        selected_entries = []
         for item in selected_items:
             entry = item.data(0, Qt.ItemDataRole.UserRole)
             if entry:
-                if entry['is_dir']:
-                    dir_count += 1
-                else:
-                    file_count += 1
-
-        # Store source cluster to determine if we are pasting into the same folder later
-        if selected_items:
-            first_entry = selected_items[0].data(0, Qt.ItemDataRole.UserRole)
-            if first_entry:
-                # parent_cluster is now always present in entries (set in refresh_file_list)
-                self._clipboard_source_cluster = self._normalize_parent_cluster(first_entry.get('parent_cluster'))
-            else:
-                self._clipboard_source_cluster = None
-        else:
-            self._clipboard_source_cluster = None
-
-        # If we had a pending cut, undim those items visually since this copy cancels the cut
+                selected_entries.append(entry)
+        
+        if not selected_entries:
+            return
+        
+        # If we had a pending cut, undim those items
         if self._cut_entries:
             self._undim_all_items()
-
-        # Clear any pending cut operation since we are doing a new copy
+        
+        # Use clipboard manager for copy operation
+        result = self.clipboard_mgr.copy_files(selected_entries, self.image)
+        
+        # Clear any pending cut operation
         self._cut_entries = []
-
-        # Cleanup previous temp dir
-        if self._last_copy_temp_dir and os.path.exists(self._last_copy_temp_dir):
-            try:
-                shutil.rmtree(self._last_copy_temp_dir)
-            except Exception as e:
-                self.logger.warning(f"Failed to cleanup old temp dir: {e}")
         
-        self._last_copy_temp_dir = tempfile.mkdtemp(prefix="fat12_copy_")
-        
-        urls = []
-        for item in selected_items:
-            entry = item.data(0, Qt.ItemDataRole.UserRole)
-            if entry and not entry['is_dir']:
-                try:
-                    data = self.image.extract_file(entry)
-                    filename = entry['name']
-                    filepath = os.path.join(self._last_copy_temp_dir, filename)
-                    with open(filepath, 'wb') as f:
-                        f.write(data)
-                    urls.append(QUrl.fromLocalFile(filepath))
-                except Exception as e:
-                    self.logger.warning(f"Failed to extract {entry['name']} for copy: {e}")
-        
-        # Warn if directories were excluded.
-        if dir_count > 0:
+        # Show warning if directories were excluded
+        if result.excluded_dirs > 0:
             QMessageBox.information(
                 self,
                 "Directories Not Supported",
                 f"Copy operations currently support files only.\n\n"
-                f"{dir_count} director{'y' if dir_count == 1 else 'ies'} will be excluded."
+                f"{result.excluded_dirs} director{'y' if result.excluded_dirs == 1 else 'ies'} "
+                f"will be excluded."
             )
-
-        if urls:
-            mime_data = QMimeData()
-            mime_data.setUrls(urls)
-            QApplication.clipboard().setMimeData(mime_data)
-            self.status_bar.showMessage(f"Copied {len(urls)} file(s) to clipboard")
-        elif file_count == 0:
-            self.status_bar.showMessage("No files selected to copy")
+        
+        # Update status bar
+        if result.success or result.file_count == 0:
+            self.status_bar.showMessage(result.message)
 
     def paste_from_clipboard(self):
         """Paste files from system clipboard"""
         if not self.image:
             return
-
-        mime_data = QApplication.clipboard().mimeData()
-        if not mime_data or not mime_data.hasUrls():
+        
+        # Get clipboard info and files
+        files, auto_rename, is_cut = self.clipboard_mgr.get_paste_info()
+        
+        if not files:
             self.status_bar.showMessage("Clipboard is empty or contains no files")
             return
-
-        files = []
-        for url in mime_data.urls():
-            if url.isLocalFile():
-                fpath = url.toLocalFile()
-                if os.path.isfile(fpath):
-                    files.append(fpath)
-
-        # Check if these files match our pending cut operation
-        is_internal_cut = False
-        is_internal_copy = False
-        if self._cut_entries and self._last_copy_temp_dir and files:
-            # Check if ALL files are inside our temp dir (this is a cut operation)
-            try:
-                temp_parent = Path(self._last_copy_temp_dir).resolve()
-                is_internal_cut = all(
-                    Path(f).parent.resolve() == temp_parent 
-                    for f in files
-                )
-            except Exception as e:
-                self.logger.warning(f"Failed to verify internal cut: {e}")
-                is_internal_cut = False
-        elif self._last_copy_temp_dir and files:
-            # Check if this is an internal copy (not cut)
-            try:
-                temp_parent = Path(self._last_copy_temp_dir).resolve()
-                is_internal_copy = all(
-                    Path(f).parent.resolve() == temp_parent 
-                    for f in files
-                )
-            except Exception as e:
-                self.logger.warning(f"Failed to verify internal copy: {e}")
-                is_internal_copy = False
         
-        # If we have cut entries but the clipboard files are NOT from our temp dir,
-        # it means the user copied something else externally.
-        # We should cancel the cut operation to prevent deleting the original files.
-        if self._cut_entries and not is_internal_cut:
-            self._cut_entries = []
-            self._undim_all_items()
-            self.status_bar.showMessage("External clipboard content detected. Cut operation cancelled.")
-
-        if files:
-            # Determine target parent cluster from selection (same logic as add_files_from_list)
-            parent_cluster = None
-            selected_items = self.table.selectedItems()
-            if selected_items:
-                item = selected_items[0]
-                entry = item.data(0, Qt.ItemDataRole.UserRole)
-                if entry:
-                    if entry['is_dir']:
-                        parent_cluster = entry['cluster']
-                    else:
-                        parent_cluster = entry.get('parent_cluster')
-            
-            # Normalize for consistent comparison
-            parent_cluster = self._normalize_parent_cluster(parent_cluster)
-
-            # If this is a paste from a cut operation, check if source == destination
-            if self._cut_entries:
-                # Check if we are pasting into the same directory as the source
-                # We assume all cut items are from the same directory (current view)
-                first_cut = self._cut_entries[0]
+        # Determine target parent cluster from selection
+        parent_cluster = None
+        selected_items = self.table.selectedItems()
+        if selected_items:
+            item = selected_items[0]
+            entry = item.data(0, Qt.ItemDataRole.UserRole)
+            if entry:
+                if entry['is_dir']:
+                    parent_cluster = entry['cluster']
+                else:
+                    parent_cluster = entry.get('parent_cluster')
+        
+        # Normalize for consistent comparison
+        parent_cluster = self._normalize_parent_cluster(parent_cluster)
+        
+        # Check if pasting to same location during cut
+        if is_cut:
+            cut_entries = self.clipboard_mgr.get_cut_entries()
+            if cut_entries:
+                first_cut = cut_entries[0]
                 src_parent = self._normalize_parent_cluster(first_cut.get('parent_cluster'))
                 
                 if src_parent == parent_cluster:
+                    self.clipboard_mgr.cancel_cut()
                     self._cut_entries = []
-                    QApplication.clipboard().clear()
                     self.refresh_file_list()
-                    # Set message after refresh so it doesn't get overwritten
-                    self.status_bar.showMessage("Source and destination are the same. Move cancelled.")
-                    return
-
-            # Check if this is an internal paste (source is our temp dir)
-            # If so, enable rename_on_collision to support "Copy/Paste to same folder -> Duplicate"
-            rename_on_collision = False
-            if self._last_copy_temp_dir and files and is_internal_copy:
-                try:
-                    # Only auto-rename if pasting back to the exact same source folder
-                    if self._clipboard_source_cluster == parent_cluster:
-                        rename_on_collision = True
-                except Exception:
-                    pass
-
-            # If this is a CUT operation, disable rename_on_collision to force prompt/overwrite behavior
-            if self._cut_entries:
-                rename_on_collision = False
-
-            # Add files (Copy)
-            success_count = self.add_files_from_list(files, parent_cluster, rename_on_collision)
-            
-            # If this was a cut operation, handle deletion of originals
-            if self._cut_entries:
-                if success_count == len(files):
-                    # All files pasted successfully - delete originals
-                    deleted_count = 0
-                    
-                    # Group entries by parent cluster to minimize directory reads during verification
-                    entries_by_parent = {}
-                    for entry in self._cut_entries:
-                        pc = self._normalize_parent_cluster(entry.get('parent_cluster'))
-                        if pc not in entries_by_parent:
-                            entries_by_parent[pc] = []
-                        entries_by_parent[pc].append(entry)
-
-                    for pc, entries in entries_by_parent.items():
-                        try:
-                            # Verify files still exist and match before deleting
-                            current_dir_entries = self.image.read_directory(pc)
-                            
-                            # Build map using cluster+name as key for robustness
-                            current_map = {}
-                            for e in current_dir_entries:
-                                key = (e['cluster'], e['name'].lower())
-                                current_map[key] = e
-
-                            for entry in entries:
-                                # Use cluster+name for matching instead of index
-                                key = (entry['cluster'], entry['name'].lower())
-                                match = current_map.get(key)
-                                
-                                if match and match['index'] == entry['index']:
-                                    # Extra safety: verify index still matches
-                                    self.image.delete_file(entry)
-                                    deleted_count += 1
-                                else:
-                                    self.logger.warning(
-                                        f"Skipping delete of cut file {entry['name']}: "
-                                        f"File changed or no longer exists at source."
-                                    )
-                        except Exception as e:
-                            self.logger.warning(f"Error processing cut deletion for parent {pc}: {e}")
-                    
-                    self._cut_entries = []
-                    QApplication.clipboard().clear()
-                    self.refresh_file_list()
-                    self.status_bar.showMessage(f"Moved {deleted_count} file(s)")
-                    
-                elif success_count > 0:
-                    # Partial success - ask user what to do
-                    response = QMessageBox.question(
-                        self,
-                        "Partial Paste Failure",
-                        f"Only {success_count} of {len(files)} files were pasted successfully.\n\n"
-                        f"The original files have NOT been deleted.\n"
-                        f"Do you want to clear the cut operation?",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                    )
-                    
-                    if response == QMessageBox.StandardButton.Yes:
-                        self._cut_entries = []
-                        QApplication.clipboard().clear()
-                        self.refresh_file_list()
-                    else:
-                        self.status_bar.showMessage(
-                            f"Partial paste completed. Cut files remain at source for retry."
-                        )
-                else:
-                    # Complete failure - keep cut state for retry
                     self.status_bar.showMessage(
-                        "Paste failed. Cut files remain at source. You can retry pasting."
+                        "Source and destination are the same. Move cancelled."
                     )
-        else:
-            self.status_bar.showMessage("Clipboard contains no valid files")
+                    return
+        
+        # Determine if we should auto-rename
+        rename_on_collision = auto_rename
+        
+        # If pasting to same folder where we copied from, enable auto-rename
+        if self.clipboard_mgr._source_cluster == parent_cluster:
+            rename_on_collision = True
+        
+        # Disable rename for cut operations
+        if is_cut:
+            rename_on_collision = False
+        
+        # Add files using existing method
+        success_count = self.add_files_from_list(
+            files,
+            parent_cluster,
+            rename_on_collision
+        )
+        
+        # Handle cut operation completion
+        if is_cut and success_count == len(files):
+            cut_entries = self.clipboard_mgr.get_cut_entries()
+            deleted_count = self._delete_cut_entries(cut_entries)
+            
+            # Clear cut state
+            self.clipboard_mgr.complete_cut_operation()
+            self._cut_entries = []
+            
+            if deleted_count > 0:
+                self.status_bar.showMessage(
+                    f"Moved {deleted_count} file(s)"
+                )
+            
+            self.refresh_file_list()
+        elif is_cut and success_count > 0:
+            # Partial success - ask user what to do
+            response = QMessageBox.question(
+                self,
+                "Partial Paste Failure",
+                f"Only {success_count} of {len(files)} files were pasted successfully.\n\n"
+                f"The original files have NOT been deleted.\n"
+                f"Do you want to clear the cut operation?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if response == QMessageBox.StandardButton.Yes:
+                self._cut_entries = []
+                self.clipboard_mgr.complete_cut_operation()
+                self.refresh_file_list()
+            else:
+                self.status_bar.showMessage(
+                    f"Partial paste completed. Cut files remain at source for retry."
+                )
+        elif is_cut:
+            # Complete failure - keep cut state for retry
+            self.status_bar.showMessage(
+                "Paste failed. Cut files remain at source. You can retry pasting."
+            )
+    
+    def _delete_cut_entries(self, cut_entries):
+        """Delete entries that were cut (helper for paste operation)"""
+        deleted_count = 0
+        
+        # Group entries by parent cluster
+        entries_by_parent = {}
+        for entry in cut_entries:
+            pc = self._normalize_parent_cluster(entry.get('parent_cluster'))
+            if pc not in entries_by_parent:
+                entries_by_parent[pc] = []
+            entries_by_parent[pc].append(entry)
+        
+        # Delete entries by parent group
+        for pc, entries in entries_by_parent.items():
+            try:
+                # Verify files still exist before deleting
+                current_dir_entries = self.image.read_directory(pc)
+                
+                # Build map using cluster+name as key
+                current_map = {}
+                for e in current_dir_entries:
+                    key = (e['cluster'], e['name'].lower())
+                    current_map[key] = e
+                
+                for entry in entries:
+                    key = (entry['cluster'], entry['name'].lower())
+                    match = current_map.get(key)
+                    
+                    if match and match['index'] == entry['index']:
+                        self.image.delete_file(entry)
+                        deleted_count += 1
+                    else:
+                        self.logger.warning(
+                            f"Skipping delete of cut file {entry['name']}: "
+                            f"File changed or no longer exists at source."
+                        )
+            except Exception as e:
+                self.logger.warning(
+                    f"Error processing cut deletion for parent {pc}: {e}"
+                )
+        
+        return deleted_count
 
     def create_new_image(self):
         """Create a new blank floppy disk image"""
