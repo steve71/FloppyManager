@@ -1645,83 +1645,65 @@ class FloppyManagerWindow(QMainWindow):
         if not self.image:
             return
         
-        # Get clipboard info and files
-        files, auto_rename, is_cut = self.clipboard_mgr.get_paste_info()
+        # Get target cluster
+        target_cluster = self._get_target_cluster_from_selection()
         
-        if not files:
+        # Check if paste operation is valid
+        paste_info = self.clipboard_mgr.prepare_paste(target_cluster)
+        if not paste_info:
             self.status_bar.showMessage("Clipboard is empty or contains no files")
             return
         
-        # Determine target parent cluster from selection
-        parent_cluster = None
+        if paste_info.get('cancel_reason'):
+            self._cut_entries = []
+            self.refresh_file_list()
+            self.status_bar.showMessage(paste_info['cancel_reason'])
+            return
+        
+        # Add files
+        success_count = self.add_files_from_list(
+            paste_info['files'],
+            target_cluster,
+            paste_info['rename_on_collision']
+        )
+        
+        # Handle post-paste for cut operations
+        if paste_info['is_cut']:
+            self._handle_cut_completion(success_count, len(paste_info['files']))
+    
+    def _get_target_cluster_from_selection(self):
+        """Get target cluster from current selection"""
         selected_items = self.table.selectedItems()
         if selected_items:
             item = selected_items[0]
             entry = item.data(0, Qt.ItemDataRole.UserRole)
             if entry:
                 if entry['is_dir']:
-                    parent_cluster = entry['cluster']
+                    return entry['cluster']
                 else:
-                    parent_cluster = entry.get('parent_cluster')
-        
-        # Normalize for consistent comparison
-        parent_cluster = self._normalize_parent_cluster(parent_cluster)
-        
-        # Check if pasting to same location during cut
-        if is_cut:
-            cut_entries = self.clipboard_mgr.get_cut_entries()
-            if cut_entries:
-                first_cut = cut_entries[0]
-                src_parent = self._normalize_parent_cluster(first_cut.get('parent_cluster'))
-                
-                if src_parent == parent_cluster:
-                    self.clipboard_mgr.cancel_cut()
-                    self._cut_entries = []
-                    self.refresh_file_list()
-                    self.status_bar.showMessage(
-                        "Source and destination are the same. Move cancelled."
-                    )
-                    return
-        
-        # Determine if we should auto-rename
-        rename_on_collision = auto_rename
-        
-        # If pasting to same folder where we copied from, enable auto-rename
-        if self.clipboard_mgr._source_cluster == parent_cluster:
-            rename_on_collision = True
-        
-        # Disable rename for cut operations
-        if is_cut:
-            rename_on_collision = False
-        
-        # Add files using existing method
-        success_count = self.add_files_from_list(
-            files,
-            parent_cluster,
-            rename_on_collision
-        )
-        
-        # Handle cut operation completion
-        if is_cut and success_count == len(files):
+                    return entry.get('parent_cluster')
+        return None
+    
+    def _handle_cut_completion(self, success_count, total_count):
+        """Handle completion of cut operation after paste"""
+        if success_count == total_count:
+            # Complete success - delete originals
             cut_entries = self.clipboard_mgr.get_cut_entries()
             deleted_count = self._delete_cut_entries(cut_entries)
             
-            # Clear cut state
             self.clipboard_mgr.complete_cut_operation()
             self._cut_entries = []
             
             if deleted_count > 0:
-                self.status_bar.showMessage(
-                    f"Moved {deleted_count} file(s)"
-                )
-            
+                self.status_bar.showMessage(f"Moved {deleted_count} file(s)")
             self.refresh_file_list()
-        elif is_cut and success_count > 0:
-            # Partial success - ask user what to do
+            
+        elif success_count > 0:
+            # Partial success - ask user
             response = QMessageBox.question(
                 self,
                 "Partial Paste Failure",
-                f"Only {success_count} of {len(files)} files were pasted successfully.\n\n"
+                f"Only {success_count} of {total_count} files were pasted successfully.\n\n"
                 f"The original files have NOT been deleted.\n"
                 f"Do you want to clear the cut operation?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -1733,10 +1715,10 @@ class FloppyManagerWindow(QMainWindow):
                 self.refresh_file_list()
             else:
                 self.status_bar.showMessage(
-                    f"Partial paste completed. Cut files remain at source for retry."
+                    "Partial paste completed. Cut files remain at source for retry."
                 )
-        elif is_cut:
-            # Complete failure - keep cut state for retry
+        else:
+            # Complete failure
             self.status_bar.showMessage(
                 "Paste failed. Cut files remain at source. You can retry pasting."
             )

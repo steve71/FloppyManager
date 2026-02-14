@@ -259,6 +259,67 @@ class ClipboardManager:
         
         return files, rename, is_cut
     
+    def prepare_paste(self, target_cluster: Optional[int]) -> Optional[dict]:
+        """Prepare for paste operation and validate
+        
+        Args:
+            target_cluster: Target directory cluster (None for root)
+            
+        Returns:
+            Dict with paste info or None if clipboard empty
+            Dict may contain 'cancel_reason' if operation should be cancelled
+        """
+        # Get clipboard data
+        mime_data = QApplication.clipboard().mimeData()
+        if not mime_data or not mime_data.hasUrls():
+            return None
+        
+        # Extract file paths
+        files = []
+        for url in mime_data.urls():
+            if url.isLocalFile():
+                fpath = url.toLocalFile()
+                if os.path.isfile(fpath):
+                    files.append(fpath)
+        
+        if not files:
+            return None
+        
+        # Check if this is an internal operation
+        is_internal_cut, is_internal_copy = self._check_internal_operation(files)
+        
+        # Normalize target cluster
+        target_cluster = self._normalize_cluster(target_cluster)
+        
+        # Check if pasting to same location during cut
+        if self._cut_entries and is_internal_cut:
+            first_cut = self._cut_entries[0]
+            src_parent = self._normalize_cluster(first_cut.get('parent_cluster'))
+            
+            if src_parent == target_cluster:
+                self.cancel_cut()
+                return {
+                    'cancel_reason': "Source and destination are the same. Move cancelled."
+                }
+        
+        # Determine rename behavior
+        rename_on_collision = False
+        
+        # Auto-rename for internal copy to same folder (duplicate)
+        if is_internal_copy and self._source_cluster == target_cluster:
+            rename_on_collision = True
+        
+        # Never auto-rename for cut operations
+        if self._cut_entries:
+            rename_on_collision = False
+        
+        return {
+            'files': files,
+            'rename_on_collision': rename_on_collision,
+            'is_cut': bool(self._cut_entries),
+            'cancel_reason': None
+        }
+    
     def get_cut_entries(self) -> List[dict]:
         """Get entries marked for cut operation
         
