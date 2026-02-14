@@ -77,6 +77,7 @@ class FloppyManagerWindow(QMainWindow):
 
         self.image_path = image_path
         self.image = None
+        self.log_viewer = None
         
         # Track clicks for rename-on-slow-double-click
         self._last_click_time = 0
@@ -1688,8 +1689,17 @@ class FloppyManagerWindow(QMainWindow):
 
     def view_log(self):
         """Show the application log"""
-        viewer = LogViewer("floppymanager.log", self)
-        viewer.exec()
+        if self.log_viewer is None:
+            self.log_viewer = LogViewer("floppymanager.log", self)
+            self.log_viewer.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            self.log_viewer.finished.connect(self._on_log_viewer_closed)
+            self.log_viewer.show()
+        else:
+            self.log_viewer.raise_()
+            self.log_viewer.activateWindow()
+
+    def _on_log_viewer_closed(self):
+        self.log_viewer = None
 
     def show_about(self):
         """Show about dialog"""
