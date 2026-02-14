@@ -1893,10 +1893,11 @@ class FloppyManagerWindow(QMainWindow):
                 src_parent = self._normalize_parent_cluster(first_cut.get('parent_cluster'))
                 
                 if src_parent == parent_cluster:
-                    self.status_bar.showMessage("Source and destination are the same. Move cancelled.")
                     self._cut_entries = []
                     QApplication.clipboard().clear()
                     self.refresh_file_list()
+                    # Set message after refresh so it doesn't get overwritten
+                    self.status_bar.showMessage("Source and destination are the same. Move cancelled.")
                     return
 
             # Check if this is an internal paste (source is our temp dir)
