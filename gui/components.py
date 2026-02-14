@@ -1284,8 +1284,14 @@ class LogViewer(QDialog):
         
         layout.addWidget(self.text_edit)
         
-        # Load log
-        self.load_log(self.log_path)
+        # Setup chunk loading timer
+        self.chunk_timer = QTimer(self)
+        self.chunk_timer.setSingleShot(True)
+        self.chunk_timer.timeout.connect(self._process_next_chunk)
+        self._remaining_lines = []
+        
+        # Load log asynchronously to prevent blocking UI initialization
+        QTimer.singleShot(0, lambda: self.load_log(self.log_path))
         
         # Setup timer for real-time updates
         self.timer = QTimer(self)
@@ -1329,8 +1335,62 @@ class LogViewer(QDialog):
     def on_word_wrap_toggled(self, checked):
         self.set_word_wrap(checked)
         self.settings.setValue('log_word_wrap', checked)
+
+    def _format_log_lines(self, lines):
+        """Format log lines into HTML spans"""
+        html_parts = []
+        is_dark = getattr(self, '_is_dark', False)
+        
+        for line in lines:
+            line = line.rstrip()
+            if not line:
+                continue
+                
+            # Default style
+            color = "#000000" if not is_dark else "#ffffff"
+            weight = "normal"
+            
+            # Determine style based on log level
+            if " - ERROR - " in line:
+                color = "#d32f2f" if not is_dark else "#ff6b6b" # Red
+            elif " - WARNING - " in line:
+                color = "#e65100" if not is_dark else "#ffb74d" # Orange
+            elif " - CRITICAL - " in line:
+                color = "#b71c1c" if not is_dark else "#ff5252" # Dark Red
+                weight = "bold"
+            elif " - DEBUG - " in line:
+                color = "#757575" if not is_dark else "#9e9e9e" # Gray
+            elif " - INFO - " in line:
+                color = "#2e7d32" if not is_dark else "#81c784" # Green
+            
+            # Simple HTML escaping
+            safe_line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            html_parts.append(f'<span style="color:{color}; font-weight:{weight};">{safe_line}</span><br>')
+            
+        return "".join(html_parts)
+
+    def _process_next_chunk(self):
+        """Process the next chunk of log lines"""
+        if not self._remaining_lines:
+            return
+            
+        # Process next 1000 lines
+        chunk = self._remaining_lines[:1000]
+        self._remaining_lines = self._remaining_lines[1000:]
+        
+        html_chunk = self._format_log_lines(chunk)
+        
+        cursor = self.text_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertHtml(html_chunk)
+        
+        if self._remaining_lines:
+            self.chunk_timer.start(50)
         
     def load_log(self, path):
+        self.chunk_timer.stop()
+        self._remaining_lines = []
+        
         if os.path.exists(path):
             try:
                 # Update stats
@@ -1344,39 +1404,22 @@ class LogViewer(QDialog):
                 # Determine colors based on theme (check background lightness)
                 app = QApplication.instance()
                 palette = app.palette()
-                is_dark = palette.color(QPalette.ColorRole.Base).lightness() < 128
+                self._is_dark = palette.color(QPalette.ColorRole.Base).lightness() < 128
                 
-                html_parts = ['<html><body style="font-family: Consolas, monospace; font-size: 10pt;">']
+                # Initial chunk (1000 lines)
+                initial_lines = lines[:1000]
+                self._remaining_lines = lines[1000:]
                 
-                for line in lines:
-                    line = line.rstrip()
-                    if not line:
-                        continue
-                        
-                    # Default style
-                    color = "#000000" if not is_dark else "#ffffff"
-                    weight = "normal"
-                    
-                    # Determine style based on log level
-                    if " - ERROR - " in line:
-                        color = "#d32f2f" if not is_dark else "#ff6b6b" # Red
-                    elif " - WARNING - " in line:
-                        color = "#e65100" if not is_dark else "#ffb74d" # Orange
-                    elif " - CRITICAL - " in line:
-                        color = "#b71c1c" if not is_dark else "#ff5252" # Dark Red
-                        weight = "bold"
-                    elif " - DEBUG - " in line:
-                        color = "#757575" if not is_dark else "#9e9e9e" # Gray
-                    elif " - INFO - " in line:
-                        color = "#2e7d32" if not is_dark else "#81c784" # Green
-                    
-                    # Simple HTML escaping
-                    safe_line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    html_parts.append(f'<span style="color:{color}; font-weight:{weight};">{safe_line}</span><br>')
+                html_content = '<html><body style="font-family: Consolas, monospace; font-size: 10pt;">'
+                html_content += self._format_log_lines(initial_lines)
+                html_content += '</body></html>'
                 
-                html_parts.append('</body></html>')
-                self.text_edit.setHtml("".join(html_parts))
+                self.text_edit.setHtml(html_content)
                 self.text_edit.moveCursor(QTextCursor.MoveOperation.End)
+                
+                if self._remaining_lines:
+                    self.chunk_timer.start(100)
+                    
             except Exception as e:
                 self.text_edit.setText(f"Error reading log file: {e}")
         else:
