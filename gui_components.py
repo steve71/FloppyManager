@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QStyledItemDelegate, QLineEdit, QComboBox,
     QRadioButton, QDialogButtonBox, QMessageBox, QTextEdit, QCheckBox
 )
-from PySide6.QtCore import Qt, QSize, QTimer, QMimeData, QUrl, QSettings, QFileSystemWatcher
+from PySide6.QtCore import Qt, QSize, QTimer, QMimeData, QUrl, QSettings
 from PySide6.QtGui import QColor, QPalette, QDrag, QTextCursor
 
 # Import the FAT12 handler
@@ -1255,6 +1255,10 @@ class LogViewer(QDialog):
         
         self.settings = QSettings('FloppyManager', 'Settings')
         
+        # Track file state for polling
+        self._last_mtime = 0
+        self._last_size = 0
+        
         layout = QVBoxLayout(self)
         
         self.text_edit = QTextEdit()
@@ -1274,17 +1278,13 @@ class LogViewer(QDialog):
         # Load log
         self.load_log(self.log_path)
         
-        # Setup watcher for real-time updates
-        # Use absolute path to ensure watcher works correctly
-        abs_path = str(Path(self.log_path).resolve())
-        self.watcher = QFileSystemWatcher([abs_path], self)
-        self.watcher.fileChanged.connect(lambda p: self.load_log(self.log_path))
+        # Setup timer for real-time updates
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.check_update)
+        self.timer.start(1000)
         
         # Buttons
         btn_layout = QHBoxLayout()
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(lambda: self.load_log(self.log_path))
-        btn_layout.addWidget(refresh_btn)
         
         self.wrap_cb = QCheckBox("Word Wrap")
         self.wrap_cb.setChecked(word_wrap)
@@ -1299,6 +1299,18 @@ class LogViewer(QDialog):
         
         layout.addLayout(btn_layout)
         
+    def check_update(self):
+        """Check if log file has changed"""
+        if not os.path.exists(self.log_path):
+            return
+            
+        try:
+            stat = os.stat(self.log_path)
+            if stat.st_mtime != self._last_mtime or stat.st_size != self._last_size:
+                self.load_log(self.log_path)
+        except OSError:
+            pass
+            
     def set_word_wrap(self, enabled):
         if enabled:
             self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
@@ -1312,6 +1324,11 @@ class LogViewer(QDialog):
     def load_log(self, path):
         if os.path.exists(path):
             try:
+                # Update stats
+                stat = os.stat(path)
+                self._last_mtime = stat.st_mtime
+                self._last_size = stat.st_size
+                
                 with open(path, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
                 
