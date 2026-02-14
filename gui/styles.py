@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+
+# Copyright (c) 2026 Stephen P Smith
+# MIT License
+
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import QApplication
 

@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+
+# Copyright (c) 2026 Stephen P Smith
+# MIT License
+
 about_html = """<h2>FloppyManager</h2>
 
         <p>A modern tool for managing files on FAT12 floppy disk images with VFAT long filename support.</p>
