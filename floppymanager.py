@@ -433,7 +433,8 @@ class FloppyManagerWindow(QMainWindow):
         file_menu.addSeparator()
 
         exit_action = QAction("E&xit", self)
-        exit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.setToolTip("Exit FloppyManager (Ctrl+Q)")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
@@ -489,6 +490,13 @@ class FloppyManagerWindow(QMainWindow):
         fat_viewer_action.setToolTip("View File Allocation Table as a grid")
         fat_viewer_action.triggered.connect(self.show_fat_viewer)
         view_menu.addAction(fat_viewer_action)
+
+        view_menu.addSeparator()
+
+        log_action = QAction("View &Log...", self)
+        log_action.setToolTip("View application log")
+        log_action.triggered.connect(self.view_log)
+        view_menu.addAction(log_action)
 
         # Settings menu
         settings_menu = menubar.addMenu("&Settings")
@@ -555,12 +563,6 @@ class FloppyManagerWindow(QMainWindow):
 
         # Help menu
         help_menu = menubar.addMenu("&Help")
-
-        log_action = QAction("View &Log...", self)
-        log_action.triggered.connect(self.view_log)
-        help_menu.addAction(log_action)
-
-        help_menu.addSeparator()
 
         about_action = QAction("&About", self)
         about_action.triggered.connect(self.show_about)
@@ -2259,6 +2261,7 @@ class FloppyManagerWindow(QMainWindow):
         <ul>
         <li>Ctrl+V - Paste files</li>
         <li>Ctrl+D - Duplicate files</li>
+        <li>Ctrl+Q - Exit FloppyManager</li>
         <li>Ctrl+Shift+S - Save image as</li>
         <li>Ctrl+Shift+F - Format disk</li>
         <li>Del/Backspace - Delete selected files</li>
