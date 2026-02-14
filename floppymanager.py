@@ -861,8 +861,11 @@ class FloppyManagerWindow(QMainWindow):
                 except Exception as e:
                     self.logger.warning(f"Failed to cleanup temp dir: {e}")
             self._last_copy_temp_dir = None
-            self._clipboard_source_cluster = None
             QApplication.clipboard().clear()
+        
+        # Invalidate source cluster for copy operations from previous image
+        # This prevents "Duplicate" behavior (auto-rename) when pasting from a previous image
+        self._clipboard_source_cluster = object()
         
         try:
             self.image = FAT12Image(filepath)
