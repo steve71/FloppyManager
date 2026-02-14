@@ -169,6 +169,10 @@ class FloppyManagerWindow(QMainWindow):
         self.table.setSortingEnabled(True)
         # Disable all automatic edit triggers - we'll handle this manually
         self.table.setEditTriggers(QTreeWidget.EditTrigger.NoEditTriggers)
+        
+        # Enable tree expansion on double-click
+        self.table.setItemsExpandable(True)
+        self.table.setExpandsOnDoubleClick(True)
 
         # Track editing state
         self._editing_in_progress = False
@@ -190,6 +194,9 @@ class FloppyManagerWindow(QMainWindow):
 
         # Handle clicks for rename
         self.table.clicked.connect(self.on_table_clicked)
+        
+        # Handle double-clicks to reset rename tracking
+        self.table.itemDoubleClicked.connect(self.on_item_double_clicked)
 
         # Context menu
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1987,6 +1994,14 @@ class FloppyManagerWindow(QMainWindow):
             self._last_click_row = -1
             self._last_click_col = -1
     
+    def on_item_double_clicked(self, item, column):
+        """Handle double-click - just reset tracking to prevent rename trigger"""
+        # Reset click tracking so the next click doesn't think it's a slow double-click
+        self._last_click_time = 0
+        self._last_click_row = -1
+        self._last_click_col = -1
+        # Qt's built-in expand/collapse will handle the folder opening
+    
     def on_table_clicked(self, index):
         """Handle single clicks on table - detect slow double-click for rename"""
         import time
@@ -2005,6 +2020,10 @@ class FloppyManagerWindow(QMainWindow):
         # Check if this is a slow double-click (click on already selected item)
         # Windows uses ~500ms minimum between clicks for rename
         time_since_last_click = current_time - self._last_click_time
+        
+        # Ignore very fast clicks (< 0.3s) - these are part of a double-click
+        if time_since_last_click < 0.3 and row == self._last_click_row:
+            return
         
         # Conditions for rename:
         # 1. Same row as last click
