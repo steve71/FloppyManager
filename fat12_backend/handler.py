@@ -13,15 +13,14 @@ import struct
 import datetime
 import random
 import logging
-from pathlib import Path
 from typing import List, Optional
 
-from vfat_utils import (encode_fat_time, encode_fat_date, 
+from .vfat_utils import (encode_fat_time, encode_fat_date,
                         generate_83_name, create_lfn_entries, 
                         format_83_name, DIR_ATTR_OFFSET, DIR_CRT_TIME_TENTH_OFFSET,
                         DIR_SHORT_NAME_LEN, DIR_LAST_MOD_TIME_OFFSET)
 
-from fat12_directory import (
+from .directory import (
     read_directory, get_existing_83_names_in_directory,
     find_free_directory_entries, write_directory_entries,
     create_directory, delete_directory, delete_directory_entry,

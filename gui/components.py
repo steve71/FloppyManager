@@ -10,17 +10,17 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, 
     QTabWidget, QHeaderView, QPushButton, QLabel, QGridLayout,
-    QWidget, QScrollArea, QSizePolicy, QSpinBox, QFrame, QApplication,
+    QWidget, QScrollArea, QSpinBox, QFrame, QApplication,
     QTreeWidget, QTreeWidgetItem, QStyledItemDelegate, QLineEdit, QComboBox,
     QRadioButton, QDialogButtonBox, QMessageBox, QTextEdit, QCheckBox
 )
-from PySide6.QtCore import Qt, QSize, QTimer, QMimeData, QUrl, QSettings
+from PySide6.QtCore import Qt, QTimer, QMimeData, QUrl, QSettings
 from PySide6.QtGui import QColor, QPalette, QDrag, QTextCursor
 
 # Import the FAT12 handler
-from fat12_handler import FAT12Image
-from fat12_directory import FAT12CorruptionError, FAT12Error
-from vfat_utils import parse_raw_lfn_entry, parse_raw_short_entry, get_raw_entry_chain, split_filename_for_editing
+from fat12_backend.handler import FAT12Image
+from fat12_backend.directory import FAT12CorruptionError
+from fat12_backend.vfat_utils import parse_raw_lfn_entry, parse_raw_short_entry, get_raw_entry_chain, split_filename_for_editing
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,7 @@
 import pytest
 import datetime
 import struct
-from vfat_utils import (
+from fat12_backend.vfat_utils import (
     decode_fat_time, decode_fat_date, 
     encode_fat_time, encode_fat_date,
     generate_83_name, is_valid_83_char,
@@ -422,7 +422,7 @@ class TestEntryChains:
 
 class TestFilenameSplitting:
     def test_split_filename_for_editing(self):
-        from vfat_utils import split_filename_for_editing
+        from fat12_backend.vfat_utils import split_filename_for_editing
         
         # Standard file with extension
         full, start, end = split_filename_for_editing("document.txt")

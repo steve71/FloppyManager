@@ -24,7 +24,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from vfat_utils import (
+from .vfat_utils import (
     decode_lfn_text, decode_short_name, decode_raw_83_name,
     calculate_lfn_checksum, create_lfn_entries, generate_83_name,
     format_83_name, decode_fat_date, decode_fat_time,
