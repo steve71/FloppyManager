@@ -79,6 +79,18 @@ class FAT12Image:
             'reserved_sectors': 1,
             'hidden_sectors': 0
         },
+        '1.68MB': {
+            'name': '3.5" High Density DMF (1.68 MB)',
+            'total_sectors': 3360,
+            'sectors_per_cluster': 2,
+            'sectors_per_track': 21,
+            'heads': 2,
+            'root_entries': 224,
+            'media_descriptor': 0xF0,
+            'sectors_per_fat': 9,
+            'reserved_sectors': 1,
+            'hidden_sectors': 0
+        },
         '1.2MB': {
             'name': '5.25" High Density (1.2 MB)',
             'total_sectors': 2400,
