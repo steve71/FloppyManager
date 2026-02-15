@@ -67,6 +67,18 @@ class FAT12Image:
             'reserved_sectors': 1,
             'hidden_sectors': 0
         },
+        '1.68MB': {
+            'name': '3.5" High Density DMF (1.68 MB)',
+            'total_sectors': 3360,
+            'sectors_per_cluster': 2,
+            'sectors_per_track': 21,
+            'heads': 2,
+            'root_entries': 224,
+            'media_descriptor': 0xF0,
+            'sectors_per_fat': 9,
+            'reserved_sectors': 1,
+            'hidden_sectors': 0
+        },
         '2.88MB': {
             'name': '3.5" Extra High Density (2.88 MB)',
             'total_sectors': 5760,
@@ -79,15 +91,15 @@ class FAT12Image:
             'reserved_sectors': 1,
             'hidden_sectors': 0
         },
-        '1.68MB': {
-            'name': '3.5" High Density DMF (1.68 MB)',
-            'total_sectors': 3360,
+        '360KB': {
+            'name': '5.25" Double Density (360 KB)',
+            'total_sectors': 720,
             'sectors_per_cluster': 2,
-            'sectors_per_track': 21,
+            'sectors_per_track': 9,
             'heads': 2,
-            'root_entries': 224,
-            'media_descriptor': 0xF0,
-            'sectors_per_fat': 9,
+            'root_entries': 112,
+            'media_descriptor': 0xFD,
+            'sectors_per_fat': 2,
             'reserved_sectors': 1,
             'hidden_sectors': 0
         },
@@ -103,15 +115,39 @@ class FAT12Image:
             'reserved_sectors': 1,
             'hidden_sectors': 0
         },
-        '360KB': {
-            'name': '5.25" Double Density (360 KB)',
-            'total_sectors': 720,
+        '320KB': {
+            'name': '5.25" Double-Sided (320 KB)',
+            'total_sectors': 640,
             'sectors_per_cluster': 2,
-            'sectors_per_track': 9,
+            'sectors_per_track': 8,
             'heads': 2,
             'root_entries': 112,
-            'media_descriptor': 0xFD,
+            'media_descriptor': 0xFF,
+            'sectors_per_fat': 1,
+            'reserved_sectors': 1,
+            'hidden_sectors': 0
+        },
+        '180KB': {
+            'name': '5.25" Single-Sided (180 KB)',
+            'total_sectors': 360,
+            'sectors_per_cluster': 1,
+            'sectors_per_track': 9,
+            'heads': 1,
+            'root_entries': 64,
+            'media_descriptor': 0xFC,
             'sectors_per_fat': 2,
+            'reserved_sectors': 1,
+            'hidden_sectors': 0
+        },
+        '160KB': {
+            'name': '5.25" Single-Sided (160 KB)',
+            'total_sectors': 320,
+            'sectors_per_cluster': 1,
+            'sectors_per_track': 8,
+            'heads': 1,
+            'root_entries': 64,
+            'media_descriptor': 0xFE,
+            'sectors_per_fat': 1,
             'reserved_sectors': 1,
             'hidden_sectors': 0
         }
