@@ -95,7 +95,7 @@ Verified to work on my Yamaha DGX-500 keyboard and Gotek SFR1M44-U100LQD 3.5inch
 - **Persistent Settings** - Remembers last opened image and settings between sessions
 
 ### File Management
-- **Create new blank floppy images** - standard 1.44MB FAT12 floppy images
+- **Create new blank floppy images** - Supports 1.44MB, 720KB, 1.68MB DMF, 2.88MB, 1.2MB, and 360KB formats
 - **Open existing floppy images** - Open and manage files on existing .img files
 - **Close image** - Close the current image to return to empty state
 - **Sector-Level Precision**: Writes directly to the image file without needing to mount it as a drive
@@ -129,10 +129,17 @@ Verified to work on my Yamaha DGX-500 keyboard and Gotek SFR1M44-U100LQD 3.5inch
 - **Delete/Backspace** - Delete selected files
 - **Ctrl+A** - Select all
 - **Ctrl+N** - Create new image
-- **Ctrl+O** - Open different image
+- **Ctrl+O** - Open image
 - **Ctrl+W** - Close image
+- **Ctrl+X** - Cut files 
+- **Ctrl+C** - Copy files 
+- **Ctrl+V** - Paste files 
+- **Ctrl+D** - Duplicate files 
+- **Ctrl+Q** - Exit FloppyManager 
 - **Ctrl+Shift+S** - Save image as
 - **Ctrl+Shift+F** - Format disk
+- **Ctrl+Shift+D** - Defragment disk 
+- **Del/Backspace** - Delete selected files 
 
 ---
 
